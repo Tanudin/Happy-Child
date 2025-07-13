@@ -1,4 +1,5 @@
 import { Button, Input } from '@rneui/themed'
+import { useRouter } from 'expo-router'
 import React, { useState } from 'react'
 import { Alert, StyleSheet, View } from 'react-native'
 import { supabase } from '../lib/supabase'
@@ -34,6 +35,12 @@ export default function Auth() {
     setLoading(false)
   }
 
+  const router = useRouter()
+
+  function navigateToResetPassword() {
+    router.push('/reset-password-request')
+  }
+
   return (
     <View style={styles.container}>
       <View style={[styles.verticallySpaced, styles.mt20]}>
@@ -62,6 +69,9 @@ export default function Auth() {
       </View>
       <View style={styles.verticallySpaced}>
         <Button title="Sign up" disabled={loading} onPress={() => signUpWithEmail()} />
+      </View>
+      <View style={[styles.verticallySpaced, styles.mt20]}>
+        <Button title="Forgot Password?" disabled={loading} onPress={() => navigateToResetPassword()} />
       </View>
     </View>
   )

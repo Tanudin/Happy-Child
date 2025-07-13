@@ -1,60 +1,49 @@
-// app/_layout.tsx
-import { Session } from '@supabase/supabase-js'
-import { Stack } from 'expo-router'
-import { useEffect, useState } from 'react'
-import { ActivityIndicator, View } from 'react-native'
-import Auth from '../../components/Auth'
-import { isBrowser } from '../../lib/platformUtils'
+import { TabBarIcon } from '@/components/navigation/TabBarIcon'
+import { Colors } from '@/constants/Colors'
+import { useColorScheme } from '@/hooks/useColorScheme'
+import { Tabs } from 'expo-router'
+import React from 'react'
+import { Text, TouchableOpacity } from 'react-native'
 import { supabase } from '../../lib/supabase'
 
-export default function RootLayout() {
-  const [session, setSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(true)
+export default function TabLayout() {
+  const colorScheme = useColorScheme()
 
-  useEffect(() => {
-    // Skip authentication setup on server-side rendering
-    if (!isBrowser()) {
-      setLoading(false)
-      return
-    }
-
-    // Add error handling for getSession
-    supabase.auth.getSession()
-      .then(({ data: { session } }) => {
-        setSession(session)
-        setLoading(false)
-      })
-      .catch(error => {
-        console.error('Error getting session:', error)
-        setLoading(false)
-      })
-
-    // Set up auth state change listener with error handling
-    try {
-      const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
-        setSession(session)
-      })
-
-      return () => {
-        subscription?.subscription?.unsubscribe()
-      }
-    } catch (error) {
-      console.error('Error setting up auth state change listener:', error)
-      return () => {}
-    }
-  }, [])
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
-      </View>
-    )
-  }
-
-  if (!session) {
-    return <Auth />
-  }
-
-  return <Stack />
+  return (
+    <Tabs
+      screenOptions={{
+        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        headerShown: true,
+      }}>
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ color, focused }) => (
+            <TabBarIcon name={focused ? 'home' : 'home-outline'} color={color} />
+          ),
+          headerRight: () => (
+            <TouchableOpacity
+              style={{ marginRight: 15 }}
+              onPress={async () => {
+                await supabase.auth.signOut();
+                // The state change will be handled by the listener in _layout.tsx
+              }}
+            >
+              <Text style={{ color: Colors[colorScheme ?? 'light'].tint }}>Logout</Text>
+            </TouchableOpacity>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="explore"
+        options={{
+          title: 'Explore',
+          tabBarIcon: ({ color, focused }) => (
+            <TabBarIcon name={focused ? 'code-slash' : 'code-slash-outline'} color={color} />
+          ),
+        }}
+      />
+    </Tabs>
+  )
 }
