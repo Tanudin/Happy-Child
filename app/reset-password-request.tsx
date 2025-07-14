@@ -16,14 +16,14 @@ export default function ResetPasswordRequest() {
     }
     setLoading(true)
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: 'child-tracking://reset-password-change', // Redirect URL for password change page
+      redirectTo: 'child-tracking://reset-password-change', 
     })
 
     if (error) {
       Alert.alert('Error sending reset email: ' + error.message)
     } else {
       Alert.alert('Check your email for a password reset link!')
-      router.back() // Navigate back to the login screen
+      router.back() 
     }
     setLoading(false)
   }

@@ -27,7 +27,6 @@ export default function TabLayout() {
               style={{ marginRight: 15 }}
               onPress={async () => {
                 await supabase.auth.signOut();
-                // The state change will be handled by the listener in _layout.tsx
               }}
             >
               <Text style={{ color: Colors[colorScheme ?? 'light'].tint }}>Logout</Text>

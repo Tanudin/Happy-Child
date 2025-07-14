@@ -1,18 +1,30 @@
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import React, { useEffect, useState } from 'react';
-import { Button, Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Button, Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Calendar from '../../components/Calendar';
 import { supabase } from '../../lib/supabase';
+
+interface Child {
+  id: string;
+  name: string;
+  date_of_birth: string;
+}
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<Child[]>([]);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [newChildName, setNewChildName] = useState('');
+  const [newChildBirthdate, setNewChildBirthdate] = useState('');
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [selectedChild, setSelectedChild] = useState<Child | null>(null);
 
   useEffect(() => {
     async function fetchItems() {
       try {
         const { data, error } = await supabase
-          .from('children') // Placeholder table name, adjust as needed
+          .from('children') 
           .select('*');
         if (error) {
           console.error('Error fetching items:', error);
@@ -26,29 +38,23 @@ export default function HomeScreen() {
     fetchItems();
   }, []);
 
-  const [modalVisible, setModalVisible] = useState(false);
-  const [newChildName, setNewChildName] = useState('');
-  const [newChildBirthdate, setNewChildBirthdate] = useState('');
-
   const handleAddNewChild = async () => {
     if (newChildName) {
       try {
-        // Get the current user from Supabase auth
         const { data: userData, error: userError } = await supabase.auth.getUser();
         if (userError) {
           console.error('Error fetching user:', userError);
-          alert('Failed to fetch user information.');
+          Alert.alert('Error', 'Failed to fetch user information.');
           return;
         }
         
         if (!userData?.user?.id) {
-          alert('No user is currently logged in.');
+          Alert.alert('Error', 'No user is currently logged in.');
           return;
         }
         
         const userId = userData.user.id;
         
-        // Insert the new child into the children table
         const { data: childData, error: childError } = await supabase
           .from('children')
           .insert([{ name: newChildName, date_of_birth: newChildBirthdate }])
@@ -56,43 +62,70 @@ export default function HomeScreen() {
           
         if (childError) {
           console.error('Error adding child:', childError);
-          alert('Failed to add child.');
+          Alert.alert('Error', 'Failed to add child.');
           return;
         }
         
         const childId = childData[0].id;
         
-        // Link the child to the user in the user_children table
         const { error: linkError } = await supabase
           .from('user_children')
           .insert([{ user_id: userId, child_id: childId }]);
           
         if (linkError) {
           console.error('Error linking child to user:', linkError);
-          alert('Failed to link child to user.');
-          // Optionally, rollback the child insertion if linking fails
+          Alert.alert('Error', 'Failed to link child to user.');
           await supabase.from('children').delete().eq('id', childId);
           return;
         }
         
         setItems([...items, ...(childData || [])]);
-        alert('Child added successfully!');
+        Alert.alert('Success', 'Child added successfully!');
         setNewChildName('');
         setNewChildBirthdate('');
         setModalVisible(false);
       } catch (error) {
         console.error('Error adding child:', error);
-        alert('Failed to add child.');
+        Alert.alert('Error', 'Failed to add child.');
       }
     } else {
-      alert('Please enter a name for the child.');
+      Alert.alert('Error', 'Please enter a name for the child.');
     }
   };
+
+  const handleChildPress = (child: Child) => {
+    setSelectedChild(child);
+    setShowCalendar(true);
+  };
+
+  const handleCalendarConfirm = async (selectedDates: Date[]) => {
+    if (!selectedChild) return;
+    
+    Alert.alert('Success', `Calendar events saved for ${selectedChild.name}!`);
+    setShowCalendar(false);
+    setSelectedChild(null);
+  };
+
+  const handleCalendarCancel = () => {
+    setShowCalendar(false);
+    setSelectedChild(null);
+  };
+
+  if (showCalendar && selectedChild) {
+    return (
+      <Calendar
+        childName={selectedChild.name}
+        childId={selectedChild.id}
+        onConfirm={handleCalendarConfirm}
+        onCancel={handleCalendarCancel}
+      />
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
       <Image
-        source={require('../../assets/images/logo.png')} // Adjust path to your logo
+        source={require('../../assets/images/logo.png')} 
         style={styles.logo}
         resizeMode="contain"
       />
@@ -102,10 +135,7 @@ export default function HomeScreen() {
             <TouchableOpacity
               key={item.id}
               style={[styles.button, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}
-              onPress={() => {
-                // Navigation or action logic for each item can be added here
-                console.log(`Navigating to ${item.name || 'item'}`);
-              }}
+              onPress={() => handleChildPress(item)}
             >
               <Text style={styles.buttonText}>{item.name || 'Unknown Item'}</Text>
             </TouchableOpacity>

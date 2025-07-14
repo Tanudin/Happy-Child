@@ -11,13 +11,11 @@ export default function RootLayout() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Skip authentication setup on server-side rendering
     if (!isBrowser()) {
       setLoading(false)
       return
     }
 
-    // Add error handling for getSession
     supabase.auth.getSession()
       .then(({ data: { session } }: { data: { session: Session | null } }) => {
         setSession(session)
@@ -28,7 +26,6 @@ export default function RootLayout() {
         setLoading(false)
       })
  
-    // Set up auth state change listener with error handling
     try {
       const { data: subscription } = supabase.auth.onAuthStateChange((_event: string, session: Session | null) => {
         setSession(session)

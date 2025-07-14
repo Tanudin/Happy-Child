@@ -14,7 +14,6 @@ export default function ResetPasswordChange() {
   const refreshToken = params.refresh_token as string | undefined
 
   useEffect(() => {
-    // If accessToken and refreshToken are present, set the session
     if (accessToken && refreshToken) {
       supabase.auth.setSession({
         access_token: accessToken,
@@ -41,7 +40,7 @@ export default function ResetPasswordChange() {
       Alert.alert('Error updating password: ' + error.message)
     } else {
       Alert.alert('Password updated successfully! Please log in with your new password.')
-      router.replace('/') // Navigate back to the login screen
+      router.replace('/') 
     }
     setLoading(false)
   }
