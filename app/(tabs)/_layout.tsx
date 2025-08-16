@@ -3,8 +3,6 @@ import { Colors } from '@/constants/Colors'
 import { useColorScheme } from '@/hooks/useColorScheme'
 import { Tabs } from 'expo-router'
 import React from 'react'
-import { Text, TouchableOpacity } from 'react-native'
-import { supabase } from '../../lib/supabase'
 
 export default function TabLayout() {
   const colorScheme = useColorScheme()
@@ -13,7 +11,9 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        headerShown: true,
+        headerShown: false,
+        headerTitle: '',
+        header: () => null,
       }}>
       <Tabs.Screen
         name="index"
@@ -22,24 +22,23 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <TabBarIcon name={focused ? 'home' : 'home-outline'} color={color} />
           ),
-          headerRight: () => (
-            <TouchableOpacity
-              style={{ marginRight: 15 }}
-              onPress={async () => {
-                await supabase.auth.signOut();
-              }}
-            >
-              <Text style={{ color: Colors[colorScheme ?? 'light'].tint }}>Logout</Text>
-            </TouchableOpacity>
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ color, focused }) => (
+            <TabBarIcon name={focused ? 'person' : 'person-outline'} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
-          title: 'Explore',
+          title: 'Testing',
           tabBarIcon: ({ color, focused }) => (
-            <TabBarIcon name={focused ? 'code-slash' : 'code-slash-outline'} color={color} />
+            <TabBarIcon name={focused ? 'flask' : 'flask-outline'} color={color} />
           ),
         }}
       />

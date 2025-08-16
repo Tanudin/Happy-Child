@@ -1,8 +1,12 @@
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Calendar from '../../components/Calendar';
+import ChildMenu from '../../components/ChildMenu';
+import Economics from '../../components/Economics';
+import IOSAlert from '../../components/IOSAlert';
+import { useIOSAlert } from '../../hooks/useIOSAlert';
 import { supabase } from '../../lib/supabase';
 
 interface Child {
@@ -11,25 +15,54 @@ interface Child {
   date_of_birth: string;
 }
 
+type CurrentView = 'home' | 'childMenu' | 'calendar' | 'economics';
+
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
+  const { showAlert, alertProps } = useIOSAlert();
   const [items, setItems] = useState<Child[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [newChildName, setNewChildName] = useState('');
   const [newChildBirthdate, setNewChildBirthdate] = useState('');
-  const [showCalendar, setShowCalendar] = useState(false);
+  const [currentView, setCurrentView] = useState<CurrentView>('home');
   const [selectedChild, setSelectedChild] = useState<Child | null>(null);
 
   useEffect(() => {
     async function fetchItems() {
       try {
+        // First get the current user
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError) {
+          console.error('Error fetching user:', userError);
+          return;
+        }
+        
+        if (!userData?.user?.id) {
+          console.log('No user is currently logged in.');
+          return;
+        }
+        
+        const userId = userData.user.id;
+        
+        // Fetch children that belong to the current user through the user_children junction table
         const { data, error } = await supabase
-          .from('children') 
-          .select('*');
+          .from('user_children')
+          .select(`
+            child_id,
+            children (
+              id,
+              name,
+              date_of_birth
+            )
+          `)
+          .eq('user_id', userId);
+          
         if (error) {
           console.error('Error fetching items:', error);
         } else {
-          setItems(data || []);
+          // Extract the children data from the joined result
+          const childrenData = data?.map(item => item.children).filter(child => child !== null).flat() || [];
+          setItems(childrenData);
         }
       } catch (error) {
         console.error('Error fetching items:', error);
@@ -44,12 +77,18 @@ export default function HomeScreen() {
         const { data: userData, error: userError } = await supabase.auth.getUser();
         if (userError) {
           console.error('Error fetching user:', userError);
-          Alert.alert('Error', 'Failed to fetch user information.');
+          showAlert({
+            message: 'Failed to fetch user information.',
+            type: 'error'
+          });
           return;
         }
         
         if (!userData?.user?.id) {
-          Alert.alert('Error', 'No user is currently logged in.');
+          showAlert({
+            message: 'No user is currently logged in.',
+            type: 'error'
+          });
           return;
         }
         
@@ -62,7 +101,10 @@ export default function HomeScreen() {
           
         if (childError) {
           console.error('Error adding child:', childError);
-          Alert.alert('Error', 'Failed to add child.');
+          showAlert({
+            message: 'Failed to add child.',
+            type: 'error'
+          });
           return;
         }
         
@@ -74,44 +116,89 @@ export default function HomeScreen() {
           
         if (linkError) {
           console.error('Error linking child to user:', linkError);
-          Alert.alert('Error', 'Failed to link child to user.');
+          showAlert({
+            message: 'Failed to link child to user.',
+            type: 'error'
+          });
           await supabase.from('children').delete().eq('id', childId);
           return;
         }
         
         setItems([...items, ...(childData || [])]);
-        Alert.alert('Success', 'Child added successfully!');
+        showAlert({
+          message: `${newChildName} added successfully!`,
+          type: 'success',
+          duration: 3000
+        });
         setNewChildName('');
         setNewChildBirthdate('');
         setModalVisible(false);
       } catch (error) {
         console.error('Error adding child:', error);
-        Alert.alert('Error', 'Failed to add child.');
+        showAlert({
+          message: 'Failed to add child.',
+          type: 'error'
+        });
       }
     } else {
-      Alert.alert('Error', 'Please enter a name for the child.');
+      showAlert({
+        message: 'Please enter a name for the child.',
+        type: 'warning'
+      });
     }
   };
 
+  // Updated to show child menu instead of calendar directly
   const handleChildPress = (child: Child) => {
     setSelectedChild(child);
-    setShowCalendar(true);
+    setCurrentView('childMenu');
+  };
+
+  // Navigation handlers for child menu
+  const handleBackToHome = () => {
+    setCurrentView('home');
+    setSelectedChild(null);
+  };
+
+  const handleOpenCalendar = () => {
+    setCurrentView('calendar');
+  };
+
+  const handleOpenEconomics = () => {
+    setCurrentView('economics');
   };
 
   const handleCalendarConfirm = async (selectedDates: Date[]) => {
     if (!selectedChild) return;
     
-    Alert.alert('Success', `Calendar events saved for ${selectedChild.name}!`);
-    setShowCalendar(false);
-    setSelectedChild(null);
+    showAlert({
+      message: `Calendar events saved for ${selectedChild.name}!`,
+      type: 'success'
+    });
+    setCurrentView('childMenu');
   };
 
   const handleCalendarCancel = () => {
-    setShowCalendar(false);
-    setSelectedChild(null);
+    setCurrentView('childMenu');
   };
 
-  if (showCalendar && selectedChild) {
+  const handleEconomicsBack = () => {
+    setCurrentView('childMenu');
+  };
+
+  // Render different views based on current state
+  if (currentView === 'childMenu' && selectedChild) {
+    return (
+      <ChildMenu
+        child={selectedChild}
+        onBack={handleBackToHome}
+        onCalendar={handleOpenCalendar}
+        onEconomics={handleOpenEconomics}
+      />
+    );
+  }
+
+  if (currentView === 'calendar' && selectedChild) {
     return (
       <Calendar
         childName={selectedChild.name}
@@ -122,6 +209,17 @@ export default function HomeScreen() {
     );
   }
 
+  if (currentView === 'economics' && selectedChild) {
+    return (
+      <Economics
+        childName={selectedChild.name}
+        childId={selectedChild.id}
+        onBack={handleEconomicsBack}
+      />
+    );
+  }
+
+  // Home view (default)
   return (
     <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
       <Image
@@ -131,23 +229,23 @@ export default function HomeScreen() {
       />
       <View style={styles.buttonContainer}>
         {items.length > 0 ? (
-          items.slice(0, 2).map((item) => (
+          items.map((item) => (
             <TouchableOpacity
               key={item.id}
-              style={[styles.button, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}
+              style={[styles.button, { backgroundColor: Colors[colorScheme ?? 'light'].primary }]}
               onPress={() => handleChildPress(item)}
             >
-              <Text style={styles.buttonText}>{item.name || 'Unknown Item'}</Text>
+              <Text style={[styles.buttonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>{item.name || 'Unknown Item'}</Text>
             </TouchableOpacity>
           ))
         ) : (
-          <Text style={styles.noItemsText}>No items found in database</Text>
+          <Text style={[styles.noItemsText, { color: Colors[colorScheme ?? 'light'].textSecondary }]}>No items found in database</Text>
         )}
         <TouchableOpacity
-          style={[styles.addButton, { borderColor: Colors[colorScheme ?? 'light'].tint }]}
+          style={[styles.addButton, { borderColor: Colors[colorScheme ?? 'light'].primary }]}
           onPress={() => setModalVisible(true)}
         >
-          <Text style={[styles.addButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>Add New Item</Text>
+          <Text style={[styles.addButtonText, { color: Colors[colorScheme ?? 'light'].primary }]}>Add New Item</Text>
         </TouchableOpacity>
       </View>
       <Modal
@@ -157,27 +255,50 @@ export default function HomeScreen() {
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add New Child</Text>
+          <View style={[styles.modalContent, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground }]}>
+            <Text style={[styles.modalTitle, { color: Colors[colorScheme ?? 'light'].text }]}>Add New Child</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { 
+                backgroundColor: Colors[colorScheme ?? 'light'].inputBackground,
+                borderColor: Colors[colorScheme ?? 'light'].border,
+                color: Colors[colorScheme ?? 'light'].text
+              }]}
               placeholder="Child's Name"
+              placeholderTextColor={Colors[colorScheme ?? 'light'].textSecondary}
               value={newChildName}
               onChangeText={setNewChildName}
             />
             <TextInput
-              style={styles.input}
+              style={[styles.input, { 
+                backgroundColor: Colors[colorScheme ?? 'light'].inputBackground,
+                borderColor: Colors[colorScheme ?? 'light'].border,
+                color: Colors[colorScheme ?? 'light'].text
+              }]}
               placeholder="Child's Birthdate (YYYY-MM-DD)"
+              placeholderTextColor={Colors[colorScheme ?? 'light'].textSecondary}
               value={newChildBirthdate}
               onChangeText={setNewChildBirthdate}
             />
             <View style={styles.modalButtons}>
-              <Button title="Cancel" onPress={() => setModalVisible(false)} />
-              <Button title="Add" onPress={handleAddNewChild} />
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: Colors[colorScheme ?? 'light'].textSecondary }]}
+                onPress={() => setModalVisible(false)}
+              >
+                <Text style={[styles.modalButtonText, { color: Colors[colorScheme ?? 'light'].cardBackground }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: Colors[colorScheme ?? 'light'].primary }]}
+                onPress={handleAddNewChild}
+              >
+                <Text style={[styles.modalButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>Add</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
+      
+      {/* iOS Alert Component */}
+      <IOSAlert {...alertProps} />
     </View>
   );
 }
@@ -223,7 +344,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   noItemsText: {
-    color: '#888',
     fontSize: 16,
     marginTop: 20,
   },
@@ -234,7 +354,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
-    backgroundColor: 'white',
     borderRadius: 10,
     padding: 20,
     width: '80%',
@@ -249,7 +368,6 @@ const styles = StyleSheet.create({
     width: '100%',
     padding: 10,
     borderWidth: 1,
-    borderColor: '#ccc',
     borderRadius: 5,
     marginBottom: 10,
   },
@@ -259,5 +377,15 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingHorizontal: 20,
     marginTop: 20,
+  },
+  modalButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginHorizontal: 8,
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

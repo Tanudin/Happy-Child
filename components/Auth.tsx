@@ -1,93 +1,150 @@
-import { Button, Input } from '@rneui/themed'
-import { useRouter } from 'expo-router'
-import React, { useState } from 'react'
-import { Alert, StyleSheet, View } from 'react-native'
+import React, { useEffect, useState } from 'react'
+import { Linking } from 'react-native'
 import { supabase } from '../lib/supabase'
+import AuthForm from './AuthForm'
+import NewPassword from './NewPassword'
+import ResetPassword from './ResetPassword'
+import WelcomeScreen from './WelcomeScreen'
 
-export default function Auth() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+interface AuthProps {
+  forceShow?: boolean
+  onPasswordRecoveryComplete?: () => void
+}
 
-  async function signInWithEmail() {
-    setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email,
-      password: password,
+export default function Auth({ forceShow = false, onPasswordRecoveryComplete }: AuthProps) {
+  const [currentView, setCurrentView] = useState<'welcome' | 'login' | 'signup' | 'reset-password' | 'new-password'>('welcome')
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false)
+
+  useEffect(() => {
+    // If forceShow is true, we're being shown for password recovery
+    if (forceShow && !isPasswordRecovery) {
+      setIsPasswordRecovery(true)
+      setCurrentView('new-password')
+    }
+
+    // Handle deep linking for password recovery
+    const handleDeepLink = (url: string) => {
+      if (url.includes('type=recovery') || url.includes('password_recovery') || url.includes('access_token')) {
+        setIsPasswordRecovery(true)
+        setCurrentView('new-password')
+      }
+    }
+
+    // Check initial URL
+    Linking.getInitialURL().then((url) => {
+      if (url) {
+        handleDeepLink(url)
+      }
     })
 
-    if (error) Alert.alert(error.message)
-    setLoading(false)
-  }
-
-  async function signUpWithEmail() {
-    setLoading(true)
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.signUp({
-      email: email,
-      password: password,
+    // Listen for incoming URLs
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      handleDeepLink(url)
     })
 
-    if (error) Alert.alert(error.message)
-    if (!session) Alert.alert('Please check your inbox for email verification!')
-    setLoading(false)
+    // Check initial session and handle password recovery
+    const checkPasswordRecovery = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        // Don't automatically set to new-password here unless we're sure it's recovery
+        // Let the auth state change handle it
+      } catch (error) {
+        // Handle error silently
+      }
+    }
+
+    // Small delay to ensure auth is initialized
+    const timer = setTimeout(checkPasswordRecovery, 100)
+
+    // Listen for auth state changes to detect password recovery
+    const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true)
+        setCurrentView('new-password')
+      } else if (event === 'SIGNED_IN' && session?.user) {
+        // Check if this sign in is from a recovery email
+        const currentUrl = await Linking.getInitialURL()
+        if (currentUrl && (currentUrl.includes('type=recovery') || currentUrl.includes('password_recovery') || currentUrl.includes('access_token'))) {
+          setIsPasswordRecovery(true)
+          setCurrentView('new-password')
+        }
+      }
+    })
+
+    return () => {
+      clearTimeout(timer)
+      subscription?.remove()
+      authSubscription.unsubscribe()
+    }
+  }, [forceShow])
+
+  function handleEmailSignUp() {
+    setCurrentView('signup')
   }
 
-  const router = useRouter()
+  function handleLogin() {
+    setCurrentView('login')
+  }
 
-  function navigateToResetPassword() {
-    router.push('/reset-password-request')
+  function handleBack() {
+    setCurrentView('welcome')
+  }
+
+  function handleForgotPassword() {
+    setCurrentView('reset-password')
+  }
+
+  function handleBackToLogin() {
+    setCurrentView('login')
+  }
+
+  function handlePasswordUpdateSuccess() {
+    // After successful password update, clear recovery mode and go back to welcome
+    setIsPasswordRecovery(false)
+    setCurrentView('welcome')
+    // Notify parent component that password recovery is complete
+    onPasswordRecoveryComplete?.()
+  }
+
+  function handleCancelPasswordUpdate() {
+    // If user cancels password update, clear recovery mode and go back to welcome
+    setIsPasswordRecovery(false)
+    setCurrentView('welcome')
+    // Notify parent component that password recovery is complete
+    onPasswordRecoveryComplete?.()
+  }
+
+  if (currentView === 'welcome') {
+    return (
+      <WelcomeScreen 
+        onEmailSignUp={handleEmailSignUp}
+        onLogin={handleLogin}
+      />
+    )
+  }
+
+  if (currentView === 'reset-password') {
+    return (
+      <ResetPassword 
+        onBack={handleBackToLogin}
+      />
+    )
+  }
+
+  if (currentView === 'new-password') {
+    return (
+      <NewPassword 
+        onSuccess={handlePasswordUpdateSuccess}
+        onBack={handleCancelPasswordUpdate}
+      />
+    )
   }
 
   return (
-    <View style={styles.container}>
-      <View style={[styles.verticallySpaced, styles.mt20]}>
-        <Input
-          label="Email"
-          leftIcon={{ type: 'font-awesome', name: 'envelope' }}
-          onChangeText={(text) => setEmail(text)}
-          value={email}
-          placeholder="email@address.com"
-          autoCapitalize={'none'}
-        />
-      </View>
-      <View style={styles.verticallySpaced}>
-        <Input
-          label="Password"
-          leftIcon={{ type: 'font-awesome', name: 'lock' }}
-          onChangeText={(text) => setPassword(text)}
-          value={password}
-          secureTextEntry={true}
-          placeholder="Password"
-          autoCapitalize={'none'}
-        />
-      </View>
-      <View style={[styles.verticallySpaced, styles.mt20]}>
-        <Button title="Sign in" disabled={loading} onPress={() => signInWithEmail()} />
-      </View>
-      <View style={styles.verticallySpaced}>
-        <Button title="Sign up" disabled={loading} onPress={() => signUpWithEmail()} />
-      </View>
-      <View style={[styles.verticallySpaced, styles.mt20]}>
-        <Button title="Forgot Password?" disabled={loading} onPress={() => navigateToResetPassword()} />
-      </View>
-    </View>
+    <AuthForm 
+      initialTab={currentView === 'login' ? 'login' : 'signup'}
+      onBack={handleBack}
+      onForgotPassword={handleForgotPassword}
+    />
   )
 }
-
-const styles = StyleSheet.create({
-  container: {
-    marginTop: 40,
-    padding: 12,
-  },
-  verticallySpaced: {
-    paddingTop: 4,
-    paddingBottom: 4,
-    alignSelf: 'stretch',
-  },
-  mt20: {
-    marginTop: 20,
-  },
-})
