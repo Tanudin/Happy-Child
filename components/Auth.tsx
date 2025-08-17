@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { Linking } from 'react-native'
+import AuthForm from '../app/(auth)/login'
+import NewPassword from '../app/(auth)/new-password'
+import ResetPassword from '../app/(auth)/reset-password'
+import WelcomeScreen from '../app/(auth)/welcome'
 import { supabase } from '../lib/supabase'
-import AuthForm from './AuthForm'
-import NewPassword from './NewPassword'
-import ResetPassword from './ResetPassword'
-import WelcomeScreen from './WelcomeScreen'
 
 interface AuthProps {
   forceShow?: boolean

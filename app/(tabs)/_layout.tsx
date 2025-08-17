@@ -12,8 +12,6 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
-        headerTitle: '',
-        header: () => null,
       }}>
       <Tabs.Screen
         name="index"
@@ -34,7 +32,7 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="testing"
         options={{
           title: 'Testing',
           tabBarIcon: ({ color, focused }) => (

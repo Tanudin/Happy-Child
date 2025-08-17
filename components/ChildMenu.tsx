@@ -85,15 +85,12 @@ export default function ChildMenu({ child, onBack, onCalendar, onEconomics }: Ch
 
   return (
     <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
-      {/* Header with back button */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Text style={[styles.backButtonText, { color: Colors[colorScheme ?? 'light'].primary }]}>
-            ← Back
-          </Text>
+          <Text style={[styles.backButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>‹ Back</Text>
         </TouchableOpacity>
       </View>
-
+      
       {/* Child profile section */}
       <View style={styles.profileSection}>
         {/* Child's picture with fixed size and cropping */}
@@ -172,12 +169,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
+    paddingTop: 60, // Add top padding to account for removed header
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
-    paddingTop: 10,
   },
   backButton: {
     padding: 10,

@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons'
 import React, { useState } from 'react'
 import { Alert, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
-import { Colors } from '../constants/Colors'
-import { useColorScheme } from '../hooks/useColorScheme'
-import { supabase } from '../lib/supabase'
+import { Colors } from '../../constants/Colors'
+import { useColorScheme } from '../../hooks/useColorScheme'
+import { supabase } from '../../lib/supabase'
 
 interface AuthFormProps {
   initialTab?: 'login' | 'signup'

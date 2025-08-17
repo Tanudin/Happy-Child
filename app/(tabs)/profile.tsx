@@ -1,5 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
@@ -31,6 +33,10 @@ export default function ProfileScreen() {
     setLoading(false);
   };
 
+  const handleSettingsPress = () => {
+    router.push('/child/settings');
+  };
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -41,15 +47,28 @@ export default function ProfileScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}> 
-      <Text style={[styles.title, { color: Colors[colorScheme ?? 'light'].text }]}>My Profile</Text>
-      <View style={styles.infoContainer}>
-        <Text style={[styles.label, { color: Colors[colorScheme ?? 'light'].text }]}>Email:</Text>
-        <Text style={[styles.value, { color: Colors[colorScheme ?? 'light'].text }]}>{email}</Text>
-      </View>
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity style={[styles.button, { backgroundColor: Colors[colorScheme ?? 'light'].primary }]} onPress={handleLogout}>
-          <Text style={styles.buttonText}>Logout</Text>
-        </TouchableOpacity>
+      <TouchableOpacity 
+        style={styles.settingsButton} 
+        onPress={handleSettingsPress}
+      >
+        <Ionicons 
+          name="settings" 
+          size={24} 
+          color={Colors[colorScheme ?? 'light'].text} 
+        />
+      </TouchableOpacity>
+      
+      <View style={styles.content}>
+        <Text style={[styles.title, { color: Colors[colorScheme ?? 'light'].text }]}>My Profile</Text>
+        <View style={styles.infoContainer}>
+          <Text style={[styles.label, { color: Colors[colorScheme ?? 'light'].text }]}>Email:</Text>
+          <Text style={[styles.value, { color: Colors[colorScheme ?? 'light'].text }]}>{email}</Text>
+        </View>
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity style={[styles.button, { backgroundColor: Colors[colorScheme ?? 'light'].primary }]} onPress={handleLogout}>
+            <Text style={styles.buttonText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -59,18 +78,29 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 24,
-    justifyContent: 'center',
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  settingsButton: {
+    position: 'absolute',
+    top: 50,
+    right: 24,
+    padding: 8,
+    borderRadius: 20,
+    zIndex: 1,
+  },
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 32,
     textAlign: 'center',
+    marginBottom: 32,
   },
   infoContainer: {
     marginBottom: 32,

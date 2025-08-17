@@ -2,12 +2,12 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import React, { useEffect, useState } from 'react';
 import { Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import Calendar from '../../components/Calendar';
 import ChildMenu from '../../components/ChildMenu';
-import Economics from '../../components/Economics';
 import IOSAlert from '../../components/IOSAlert';
 import { useIOSAlert } from '../../hooks/useIOSAlert';
 import { supabase } from '../../lib/supabase';
+import Calendar from '../child/calendar';
+import Economics from '../child/economics';
 
 interface Child {
   id: string;
@@ -306,9 +306,9 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    paddingTop: 60, // Add top padding to account for removed header
   },
   logo: {
     width: 200,

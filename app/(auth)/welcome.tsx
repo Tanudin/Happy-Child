@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons'
 import React from 'react'
 import { Alert, Image, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import { Colors } from '../constants/Colors'
-import { useColorScheme } from '../hooks/useColorScheme'
+import { Colors } from '../../constants/Colors'
+import { useColorScheme } from '../../hooks/useColorScheme'
 
 interface WelcomeScreenProps {
   onEmailSignUp: () => void
@@ -29,7 +29,7 @@ export default function WelcomeScreen({ onEmailSignUp, onLogin }: WelcomeScreenP
     <SafeAreaView style={[styles.welcomeContainer, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
       <View style={styles.centerSection}>
         <Image
-          source={require('../assets/images/logo.png')} 
+          source={require('../../assets/images/logo.png')} 
           style={styles.logo}
           resizeMode="contain"
         />
@@ -102,6 +102,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
+    paddingTop: 60, // Add some top padding to move content down slightly
   },
   logo: {
     width: 150,
@@ -121,7 +122,7 @@ const styles = StyleSheet.create({
   },
   buttonSection: {
     paddingHorizontal: 20,
-    paddingBottom: 50,
+    paddingBottom: 20,
   },
   googleButton: {
     flexDirection: 'row',

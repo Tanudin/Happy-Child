@@ -2,7 +2,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import React, { useEffect, useState } from 'react';
 import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../../lib/supabase';
 
 interface CalendarEvent {
   id: string;
@@ -355,16 +355,22 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
 
   return (
     <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}> 
-      {/* Header with back button */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onCancel} style={styles.backButton}>
-          <Text style={[styles.backButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>← Back</Text>
+          <Text style={[styles.backButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>‹ Back</Text>
         </TouchableOpacity>
       </View>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={[styles.childName, { color: Colors[colorScheme ?? 'light'].text }]}>
-          {childName}
+      
+      <View style={styles.content}>
+        <Text style={[styles.title, { color: Colors[colorScheme ?? 'light'].text }]}>
+          Calendar
         </Text>
+        
+        <Text style={[styles.subtitle, { color: Colors[colorScheme ?? 'light'].text }]}>
+          for {childName}
+        </Text>
+      
+        <ScrollView contentContainerStyle={styles.scrollContent}>
 
         <View style={styles.monthHeader}>
           <TouchableOpacity onPress={() => navigateMonth('prev')} style={styles.navButton}>
@@ -455,6 +461,8 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
           </View>
         )}
       </ScrollView>
+      </View>
+      
       {/* Activity Info Modal */}
       <Modal
         visible={modalVisible}
@@ -599,9 +607,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
+    paddingTop: 60, // Add top padding to account for removed header
   },
   scrollContent: {
     flexGrow: 1,
+    justifyContent: 'center', // Center the calendar content vertically
   },
   loadingContainer: {
     flex: 1,
@@ -611,11 +621,32 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
   },
-  childName: {
-    fontSize: 24,
+  content: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 28,
     fontWeight: 'bold',
     textAlign: 'center',
+    marginBottom: 10,
+  },
+  subtitle: {
+    fontSize: 18,
+    textAlign: 'center',
     marginBottom: 20,
+    opacity: 0.7,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  backButton: {
+    padding: 10,
+  },
+  backButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   monthHeader: {
     flexDirection: 'row',
@@ -705,19 +736,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginRight: 15,
     marginBottom: 5,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    paddingTop: 10,
-  },
-  backButton: {
-    padding: 10,
-  },
-  backButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   modalOverlay: {
     flex: 1,
