@@ -13,6 +13,14 @@ interface CalendarEvent {
   activity_name: string;
 }
 
+interface RecurringEvent {
+  id: string;
+  days_of_week: number[]; // Array of days [0,1,2] for Mon,Tue,Wed
+  parent_name: string; // "Mom" or "Dad" 
+  parent_type: 'mom' | 'dad';
+  color: string;
+}
+
 interface CalendarProps {
   childName: string;
   childId: string;
@@ -26,6 +34,7 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [recurringEvents, setRecurringEvents] = useState<RecurringEvent[]>([]);
   const [selectedActivity, setSelectedActivity] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [modalActivity, setModalActivity] = useState<{date: Date, activity: string} | null>(null);
@@ -34,14 +43,41 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [createModalDate, setCreateModalDate] = useState<Date | null>(null);
   const [createActivityValue, setCreateActivityValue] = useState('');
+  const [recurringModalVisible, setRecurringModalVisible] = useState(false);
+  const [fabMenuVisible, setFabMenuVisible] = useState(false);
+  const [newRecurringEvent, setNewRecurringEvent] = useState({
+    days_of_week: [] as number[],
+    parent_name: '',
+    parent_type: 'mom' as 'mom' | 'dad',
+    color: '#4285f4'
+  });
 
   useEffect(() => {
     fetchExistingEvents();
+    fetchRecurringEvents();
   }, [childId]);
 
   useEffect(() => {
     fetchExistingEvents();
   }, [currentMonth]);
+
+  const fetchRecurringEvents = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('custody_schedules')
+        .select('*')
+        .eq('child_id', childId);
+
+      if (error) {
+        console.error('Error fetching custody schedules:', error);
+        return;
+      }
+
+      setRecurringEvents(data || []);
+    } catch (error) {
+      console.error('Error fetching custody schedules:', error);
+    }
+  };
 
   const fetchExistingEvents = async () => {
     try {
@@ -93,24 +129,148 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
-    const startingDayOfWeek = firstDay.getDay();
+    
+    // Adjust for Monday start (0 = Sunday, 1 = Monday, etc.)
+    // Convert Sunday (0) to 6, Monday (1) to 0, etc.
+    const startingDayOfWeek = (firstDay.getDay() + 6) % 7;
+    const endingDayOfWeek = (lastDay.getDay() + 6) % 7;
 
-    const days = [];
+    const weeks = [];
+    let currentWeek = [];
     
-    for (let i = 0; i < startingDayOfWeek; i++) {
-      days.push(null);
+    // Add days from previous month only if needed (not a full week)
+    if (startingDayOfWeek > 0) {
+      const prevMonth = new Date(year, month - 1, 0);
+      const prevMonthDays = prevMonth.getDate();
+      for (let i = startingDayOfWeek - 1; i >= 0; i--) {
+        const prevDate = new Date(year, month - 1, prevMonthDays - i);
+        currentWeek.push({ date: prevDate, isCurrentMonth: false });
+      }
     }
     
+    // Add all days of the current month
     for (let day = 1; day <= daysInMonth; day++) {
-      days.push(new Date(year, month, day));
+      const currentDate = new Date(year, month, day);
+      currentWeek.push({ date: currentDate, isCurrentMonth: true });
+      
+      // If we've completed a week (7 days), push it to weeks array
+      if (currentWeek.length === 7) {
+        weeks.push(currentWeek);
+        currentWeek = [];
+      }
     }
     
-    return days;
+    // Add days from next month only if needed to complete the last week
+    if (currentWeek.length > 0) {
+      let nextMonthDay = 1;
+      while (currentWeek.length < 7) {
+        const nextDate = new Date(year, month + 1, nextMonthDay);
+        currentWeek.push({ date: nextDate, isCurrentMonth: false });
+        nextMonthDay++;
+      }
+      weeks.push(currentWeek);
+    }
+    
+    return weeks;
   };
 
-  const isDateSelected = (date: Date | null) => {
-    if (!date) return false;
-    return selectedDates.has(date.toISOString().split('T')[0]);
+  const getWeekNumber = (date: Date) => {
+    const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
+    const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
+    return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+  };
+
+  const getRecurringEventForDate = (date: Date) => {
+    const dayOfWeek = (date.getDay() + 6) % 7; // Convert to Monday = 0
+    return recurringEvents.find(event => event.days_of_week.includes(dayOfWeek));
+  };
+
+  const getCustodyBarStyle = (date: Date, recurringEvent: RecurringEvent | undefined) => {
+    if (!recurringEvent) return null;
+
+    const dayOfWeek = (date.getDay() + 6) % 7;
+    const sortedDays = [...recurringEvent.days_of_week].sort();
+    const currentDayIndex = sortedDays.indexOf(dayOfWeek);
+    
+    if (currentDayIndex === -1) return null;
+
+    // Check if this day is part of a consecutive sequence
+    const isFirstInSequence = currentDayIndex === 0 || sortedDays[currentDayIndex - 1] !== dayOfWeek - 1;
+    const isLastInSequence = currentDayIndex === sortedDays.length - 1 || sortedDays[currentDayIndex + 1] !== dayOfWeek + 1;
+    
+    let borderRadius = 6; // Default radius
+    let marginHorizontal = 2; // Default margin
+
+    // Adjust for connected bars
+    if (!isFirstInSequence && !isLastInSequence) {
+      // Middle of sequence - no radius, no margin
+      borderRadius = 0;
+      marginHorizontal = 0;
+    } else if (!isFirstInSequence) {
+      // Last in sequence - round right only, no left margin
+      borderRadius = 0;
+      marginHorizontal = 0;
+    } else if (!isLastInSequence) {
+      // First in sequence - round left only, no right margin
+      borderRadius = 0;
+      marginHorizontal = 0;
+    }
+
+    return {
+      borderRadius: isFirstInSequence && isLastInSequence ? 6 : 
+                   isFirstInSequence ? 6 : 
+                   isLastInSequence ? 6 : 0,
+      marginLeft: isFirstInSequence ? 2 : 0,
+      marginRight: isLastInSequence ? 2 : 0,
+      borderTopLeftRadius: isFirstInSequence ? 6 : 0,
+      borderBottomLeftRadius: isFirstInSequence ? 6 : 0,
+      borderTopRightRadius: isLastInSequence ? 6 : 0,
+      borderBottomRightRadius: isLastInSequence ? 6 : 0,
+    };
+  };
+
+  const saveRecurringEvent = async () => {
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData?.user?.id) return;
+
+      if (newRecurringEvent.days_of_week.length === 0 || !newRecurringEvent.parent_name.trim()) {
+        Alert.alert('Error', 'Please select at least one day and enter parent name.');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('custody_schedules')
+        .insert({
+          child_id: childId,
+          user_id: userData.user.id,
+          days_of_week: newRecurringEvent.days_of_week,
+          parent_name: newRecurringEvent.parent_name,
+          parent_type: newRecurringEvent.parent_type,
+          color: newRecurringEvent.color
+        });
+
+      if (error) {
+        console.error('Error saving custody schedule:', error);
+        return;
+      }
+
+      await fetchRecurringEvents();
+      setRecurringModalVisible(false);
+      setNewRecurringEvent({
+        days_of_week: [],
+        parent_name: '',
+        parent_type: 'mom',
+        color: '#4285f4'
+      });
+    } catch (error) {
+      console.error('Error saving custody schedule:', error);
+    }
+  };
+
+  const isDateSelected = (dateObj: { date: Date; isCurrentMonth: boolean } | null) => {
+    if (!dateObj) return false;
+    return selectedDates.has(dateObj.date.toISOString().split('T')[0]);
   };
 
   // Add event directly when selecting a date
@@ -337,9 +497,9 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
 
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayNames = ['M', 'T', 'W', 'Th', 'F', 'Sa', 'Su'];
 
-  const days = getDaysInMonth(currentMonth);
+  const weeks = getDaysInMonth(currentMonth);
 
   if (loading) {
     return (
@@ -359,108 +519,144 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
         <TouchableOpacity onPress={onCancel} style={styles.backButton}>
           <Text style={[styles.backButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>‹ Back</Text>
         </TouchableOpacity>
+        <Text style={[styles.childName, { color: Colors[colorScheme ?? 'light'].text }]}>
+          {childName}
+        </Text>
       </View>
       
       <View style={styles.content}>
-        <Text style={[styles.title, { color: Colors[colorScheme ?? 'light'].text }]}>
-          Calendar
-        </Text>
-        
-        <Text style={[styles.subtitle, { color: Colors[colorScheme ?? 'light'].text }]}>
-          for {childName}
-        </Text>
-      
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-
-        <View style={styles.monthHeader}>
-          <TouchableOpacity onPress={() => navigateMonth('prev')} style={styles.navButton}>
-            <Text style={[styles.navButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>‹</Text>
-          </TouchableOpacity>
-          <Text style={[styles.monthText, { color: Colors[colorScheme ?? 'light'].text }]}>
-            {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
-          </Text>
-          <TouchableOpacity onPress={() => navigateMonth('next')} style={styles.navButton}>
-            <Text style={[styles.navButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>›</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.dayNamesRow}>
-          {dayNames.map(dayName => (
-            <Text key={dayName} style={[styles.dayName, { color: Colors[colorScheme ?? 'light'].text }]}>
-              {dayName}
+        <View style={styles.calendarSection}>
+          <View style={styles.monthHeader}>
+            <TouchableOpacity onPress={() => navigateMonth('prev')} style={styles.navButton}>
+              <Text style={[styles.navButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>‹</Text>
+            </TouchableOpacity>
+            <Text style={[styles.monthText, { color: Colors[colorScheme ?? 'light'].text }]}>
+              {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
             </Text>
-          ))}
-        </View>
+            <TouchableOpacity onPress={() => navigateMonth('next')} style={styles.navButton}>
+              <Text style={[styles.navButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>›</Text>
+            </TouchableOpacity>
+          </View>
 
-        <View style={styles.calendarGrid}>
-          {days.map((date, index) => {
-            const dateKey = date ? date.toISOString().split('T')[0] : '';
-            const selectedInfo = date ? selectedDates.get(dateKey) : null;
-            return (
-              <TouchableOpacity
-                key={index}
-                style={[
-                  styles.dayCell,
-                  date && selectedInfo && [
-                    styles.selectedDay,
-                    {
-                      backgroundColor: Colors[colorScheme ?? 'light'].tint,
-                      borderColor: Colors[colorScheme ?? 'light'].tint,
-                      borderWidth: 1
-                    }
-                  ],
-                  !date && styles.emptyDay
-                ]}
-                onPress={() => date && handleShowActivityModal(date)}
-                disabled={!date}
-              >
-                {date && (
-                  <View style={styles.dayCellContent}>
-                    <Text
-                      style={[
-                        styles.dayText,
-                        selectedInfo
-                          ? { color: Colors[colorScheme ?? 'light'].calendarSelectedText, fontWeight: 'bold' }
-                          : { color: Colors[colorScheme ?? 'light'].text }
-                      ]}
-                    >
-                      {date.getDate()}
-                    </Text>
-                    {selectedInfo?.activity && (
-                      <Text
-                        style={[
-                          styles.activityText,
-                          selectedInfo
-                            ? { color: Colors[colorScheme ?? 'light'].calendarSelectedText, fontWeight: 'bold' }
-                            : { color: Colors[colorScheme ?? 'light'].text }
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {selectedInfo.activity}
-                      </Text>
-                    )}
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {selectedDates.size > 0 && (
-          <View style={styles.selectedDatesContainer}>
-            <Text style={[styles.selectedDatesTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
-              Selected Activities:
-            </Text>
-            <View style={styles.selectedDatesList}>
-              {Array.from(selectedDates.values()).map((item, index) => (
-                <Text key={index} style={[styles.selectedDateText, { color: Colors[colorScheme ?? 'light'].tint }]}>
-                  {item.date.toLocaleDateString()} - {item.activity}
+          <View style={styles.calendarContainer}>
+            <View style={styles.dayNamesRow}>
+              <View style={styles.weekNumberContainer}>
+                <Text style={[styles.weekNumber, { color: 'transparent' }]}>W</Text>
+              </View>
+              {dayNames.map(dayName => (
+                <Text key={dayName} style={[styles.dayName, { color: Colors[colorScheme ?? 'light'].text }]}>
+                  {dayName}
                 </Text>
               ))}
             </View>
+
+            <View style={styles.calendarGrid}>
+              {weeks.map((week, weekIndex) => (
+                <View key={weekIndex} style={styles.weekRow}>
+                  <View style={styles.weekNumberContainer}>
+                    <Text style={[styles.weekNumber, { color: Colors[colorScheme ?? 'light'].tint }]}>
+                      {getWeekNumber(week[0].date)}
+                    </Text>
+                  </View>
+                  {week.map((dateObj, dayIndex) => {
+                    const dateKey = dateObj.date.toISOString().split('T')[0];
+                    const selectedInfo = selectedDates.get(dateKey);
+                    const isCurrentMonth = dateObj.isCurrentMonth;
+                    const recurringEvent = getRecurringEventForDate(dateObj.date);
+                    const custodyBarStyle = getCustodyBarStyle(dateObj.date, recurringEvent);
+                    
+                    return (
+                      <TouchableOpacity
+                        key={dayIndex}
+                        style={[
+                          styles.dayCell,
+                          !isCurrentMonth && styles.otherMonthDay,
+                          selectedInfo && [
+                            styles.selectedDay,
+                            {
+                              backgroundColor: Colors[colorScheme ?? 'light'].tint,
+                              borderColor: Colors[colorScheme ?? 'light'].tint,
+                              borderWidth: 2
+                            }
+                          ]
+                        ]}
+                        onPress={() => isCurrentMonth && handleShowActivityModal(dateObj.date)}
+                        disabled={!isCurrentMonth}
+                      >
+                        <View style={styles.dayCellContent}>
+                          {recurringEvent && isCurrentMonth && (
+                            <View style={[
+                              styles.recurringIndicator, 
+                              { backgroundColor: recurringEvent.color },
+                              custodyBarStyle
+                            ]}>
+                              <Text style={styles.recurringText} numberOfLines={1}>
+                                {recurringEvent.parent_name}
+                              </Text>
+                            </View>
+                          )}
+                          <Text
+                            style={[
+                              styles.dayText,
+                              !isCurrentMonth && styles.otherMonthText,
+                              selectedInfo
+                                ? { color: Colors[colorScheme ?? 'light'].calendarSelectedText, fontWeight: 'bold' }
+                                : { color: Colors[colorScheme ?? 'light'].text },
+                              recurringEvent && { marginTop: 2 } // Add margin when recurring event is present
+                            ]}
+                          >
+                            {dateObj.date.getDate()}
+                          </Text>
+                          {selectedInfo?.activity && isCurrentMonth && (
+                            <Text
+                              style={[
+                                styles.activityText,
+                                selectedInfo
+                                  ? { color: Colors[colorScheme ?? 'light'].calendarSelectedText, fontWeight: 'bold' }
+                                  : { color: Colors[colorScheme ?? 'light'].text }
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {selectedInfo.activity}
+                            </Text>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
           </View>
-        )}
-      </ScrollView>
+        </View>
+
+        <View style={styles.todoSection}>
+          <Text style={[styles.todoTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
+            Upcoming Events
+          </Text>
+          <ScrollView style={styles.todoList} showsVerticalScrollIndicator={false}>
+            {Array.from(selectedDates.values())
+              .sort((a, b) => a.date.getTime() - b.date.getTime())
+              .slice(0, 10) // Show next 10 events
+              .map((item, index) => (
+                <View key={index} style={[styles.todoItem, { borderColor: Colors[colorScheme ?? 'light'].border }]}>
+                  <View style={styles.todoDate}>
+                    <Text style={[styles.todoDateText, { color: Colors[colorScheme ?? 'light'].tint }]}>
+                      {item.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </Text>
+                  </View>
+                  <Text style={[styles.todoActivity, { color: Colors[colorScheme ?? 'light'].text }]}>
+                    {item.activity}
+                  </Text>
+                </View>
+              ))}
+            {selectedDates.size === 0 && (
+              <Text style={[styles.noEventsText, { color: Colors[colorScheme ?? 'light'].text }]}>
+                No upcoming events scheduled
+              </Text>
+            )}
+          </ScrollView>
+        </View>
       </View>
       
       {/* Activity Info Modal */}
@@ -599,6 +795,176 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
           </View>
         </View>
       </Modal>
+      {/* Custody Schedule Modal */}
+      <Modal
+        visible={recurringModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setRecurringModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContentBox}>
+            <Text style={styles.modalTitle}>Set Custody Schedule</Text>
+            
+            <Text style={styles.modalLabel}>Select Days with this Parent:</Text>
+            <View style={styles.dayPickerRow}>
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => (
+                <TouchableOpacity
+                  key={day}
+                  style={[
+                    styles.dayPickerButton,
+                    newRecurringEvent.days_of_week.includes(index) && styles.dayPickerButtonSelected
+                  ]}
+                  onPress={() => {
+                    const updatedDays = newRecurringEvent.days_of_week.includes(index)
+                      ? newRecurringEvent.days_of_week.filter(d => d !== index)
+                      : [...newRecurringEvent.days_of_week, index];
+                    setNewRecurringEvent(prev => ({ ...prev, days_of_week: updatedDays }));
+                  }}
+                >
+                  <Text style={[
+                    styles.dayPickerText,
+                    newRecurringEvent.days_of_week.includes(index) && styles.dayPickerTextSelected
+                  ]}>
+                    {day}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.modalLabel}>Parent Type:</Text>
+            <View style={styles.parentTypeRow}>
+              <TouchableOpacity
+                style={[
+                  styles.parentTypeButton,
+                  newRecurringEvent.parent_type === 'mom' && styles.parentTypeButtonSelected
+                ]}
+                onPress={() => setNewRecurringEvent(prev => ({ 
+                  ...prev, 
+                  parent_type: 'mom',
+                  parent_name: 'Mom',
+                  color: '#ea4335' // Red for mom
+                }))}
+              >
+                <Text style={[
+                  styles.parentTypeText,
+                  newRecurringEvent.parent_type === 'mom' && styles.parentTypeTextSelected
+                ]}>
+                  Mom
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.parentTypeButton,
+                  newRecurringEvent.parent_type === 'dad' && styles.parentTypeButtonSelected
+                ]}
+                onPress={() => setNewRecurringEvent(prev => ({ 
+                  ...prev, 
+                  parent_type: 'dad',
+                  parent_name: 'Dad',
+                  color: '#4285f4' // Blue for dad
+                }))}
+              >
+                <Text style={[
+                  styles.parentTypeText,
+                  newRecurringEvent.parent_type === 'dad' && styles.parentTypeTextSelected
+                ]}>
+                  Dad
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalLabel}>Parent Name (Optional):</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={newRecurringEvent.parent_name}
+              onChangeText={(text) => setNewRecurringEvent(prev => ({ ...prev, parent_name: text }))}
+              placeholder={newRecurringEvent.parent_type === 'mom' ? 'Mom' : 'Dad'}
+              autoFocus={false}
+            />
+
+            <View style={{ flexDirection: 'row', marginTop: 20, justifyContent: 'center', alignItems: 'center' }}>
+              <TouchableOpacity style={[styles.modalActionButton, {
+                backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground,
+                borderColor: Colors[colorScheme ?? 'light'].tint,
+                borderWidth: 2,
+                shadowColor: Colors[colorScheme ?? 'light'].tint,
+                shadowOpacity: 0.15,
+                shadowRadius: 4,
+                elevation: 2
+              }]} onPress={saveRecurringEvent}>
+                <Text style={[styles.modalActionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>Save</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalCloseButton, {
+                marginLeft: 10,
+                backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground,
+                borderColor: Colors[colorScheme ?? 'light'].tint,
+                borderWidth: 2,
+                shadowColor: Colors[colorScheme ?? 'light'].tint,
+                shadowOpacity: 0.15,
+                shadowRadius: 4,
+                elevation: 2
+              }]} onPress={() => setRecurringModalVisible(false)}>
+                <Text style={[styles.modalActionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Floating Action Button */}
+      <TouchableOpacity 
+        style={[styles.fab, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}
+        onPress={() => setFabMenuVisible(!fabMenuVisible)}
+      >
+        <Text style={styles.fabText}>+</Text>
+      </TouchableOpacity>
+
+      {/* FAB Menu Overlay */}
+      {fabMenuVisible && (
+        <TouchableOpacity 
+          style={styles.fabMenuOverlay}
+          onPress={() => setFabMenuVisible(false)}
+          activeOpacity={1}
+        />
+      )}
+
+      {/* FAB Menu */}
+      {fabMenuVisible && (
+        <View style={[styles.fabMenu, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+          <TouchableOpacity 
+            style={[styles.fabMenuItem, { backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground }]}
+            onPress={() => {
+              setFabMenuVisible(false);
+              setRecurringModalVisible(true);
+            }}
+          >
+            <Text style={[styles.fabMenuItemText, { color: Colors[colorScheme ?? 'light'].text }]}>New Custody Schedule</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.fabMenuItem, { backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground }]}
+            onPress={() => {
+              setFabMenuVisible(false);
+              // Add functionality for editing existing schedules
+              Alert.alert('Edit Schedules', 'Feature coming soon!');
+            }}
+          >
+            <Text style={[styles.fabMenuItemText, { color: Colors[colorScheme ?? 'light'].text }]}>Edit Schedules</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.fabMenuItem, { backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground }]}
+            onPress={() => {
+              setFabMenuVisible(false);
+              // Add functionality for deleting schedules
+              Alert.alert('Delete Schedules', 'Feature coming soon!');
+            }}
+          >
+            <Text style={[styles.fabMenuItemText, { color: Colors[colorScheme ?? 'light'].text }]}>Delete Schedules</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -606,8 +972,8 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
-    paddingTop: 60, // Add top padding to account for removed header
+    padding: 0, // Remove padding for full screen
+    paddingTop: 60, // Keep top padding for status bar
   },
   scrollContent: {
     flexGrow: 1,
@@ -624,6 +990,53 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  calendarSection: {
+    flex: 1, // Take up most of the screen like in the image
+    marginBottom: 10,
+  },
+  todoSection: {
+    height: 150, // Fixed height for the bottom section
+    paddingTop: 10,
+    paddingHorizontal: 20, // Add horizontal padding to todo section
+  },
+  todoTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  todoList: {
+    flex: 1,
+  },
+  todoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    marginBottom: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+  },
+  todoDate: {
+    marginRight: 15,
+    minWidth: 50,
+  },
+  todoDateText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  todoActivity: {
+    fontSize: 14,
+    flex: 1,
+  },
+  noEventsText: {
+    textAlign: 'center',
+    fontSize: 14,
+    fontStyle: 'italic',
+    opacity: 0.6,
+    marginTop: 20,
+  },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
@@ -639,7 +1052,18 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    paddingHorizontal: 20, // Add horizontal padding back to header
+  },
+  childName: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+    flex: 1,
+  },
+  headerSpacer: {
+    width: 60, // Match backButton width for centering
   },
   backButton: {
     padding: 10,
@@ -653,6 +1077,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 20,
+    paddingHorizontal: 20, // Add horizontal padding
   },
   navButton: {
     padding: 10,
@@ -668,36 +1093,88 @@ const styles = StyleSheet.create({
   dayNamesRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: 10,
+    marginBottom: 0, // Remove margin for tight spacing
+    paddingHorizontal: 0, // Remove horizontal padding for full width
+    paddingVertical: 8, // Reduced vertical padding
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  weekRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+    minHeight: 50, // Reduced height
+  },
+  weekNumberContainer: {
+    width: 30, // Reduced from 40 to 30
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10, // Reduced padding
+    backgroundColor: '#f1f3f4',
+    borderRightWidth: 1,
+    borderRightColor: '#e9ecef',
+  },
+  weekNumber: {
+    fontSize: 10, // Reduced from 12 to 10
+    fontWeight: 'bold',
   },
   dayName: {
-    fontSize: 14,
+    fontSize: 12, // Reduced from 14 to 12
     fontWeight: 'bold',
     textAlign: 'center',
-    width: 40,
+    flex: 1, // Use flex instead of fixed width
+    paddingVertical: 6, // Reduced padding
+  },
+  calendarContainer: {
+    backgroundColor: '#ffffff',
+    borderRadius: 0, // Remove rounded corners for full-screen look
+    padding: 0, // Remove padding for full-screen
+    margin: 0, // Remove margins for full-screen
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+    flex: 1, // Take up all available space
   },
   calendarGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-around',
+    flexDirection: 'column', // Changed to column to stack weeks
+    flex: 1,
   },
   dayCell: {
-    width: 40,
-    height: 55,  // Increased height to accommodate activity name
+    flex: 1, // Use flex for equal distribution
+    aspectRatio: 1, // Keep cells square
     justifyContent: 'center',
     alignItems: 'center',
-    marginVertical: 2,
-    borderRadius: 10,  // Changed to rounded rectangle for more space
-    padding: 2,
+    borderRightWidth: 1,
+    borderRightColor: '#e9ecef',
+    backgroundColor: '#ffffff',
+    minHeight: 50, // Reduced minimum height
+    paddingVertical: 4, // Add small padding
   },
   emptyDay: {
     backgroundColor: 'transparent',
   },
   selectedDay: {
-    borderRadius: 20,
+    borderRadius: 0, // Remove border radius for clean look
+    borderWidth: 0, // Remove border, use background color only
   },
   dayText: {
-    fontSize: 16,
+    fontSize: 14, // Reduced from 16 for smaller appearance
+  },
+  otherMonthDay: {
+    backgroundColor: '#f8f9fa',
+    borderWidth: 0,
+    opacity: 0.6,
+  },
+  otherMonthText: {
+    color: '#999999',
+    opacity: 0.6,
   },
   selectedDayText: {
     color: '#fff',
@@ -706,9 +1183,29 @@ const styles = StyleSheet.create({
   dayCellContent: {
     alignItems: 'center',
     width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+  },
+  recurringIndicator: {
+    position: 'absolute',
+    top: 2,
+    left: 2,
+    right: 2,
+    height: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.8,
+    zIndex: 1, // Ensure it appears above other elements
+  },
+  recurringText: {
+    fontSize: 8,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    textAlign: 'center',
   },
   activityText: {
-    fontSize: 8,
+    fontSize: 9, // Reduced from 10 to keep proportional
     marginTop: 2,
     textAlign: 'center',
     width: '100%',
@@ -716,26 +1213,6 @@ const styles = StyleSheet.create({
   selectedActivityText: {
     color: '#fff',
     fontWeight: 'bold',
-  },
-  selectedDatesContainer: {
-    marginTop: 20,
-    padding: 15,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-  },
-  selectedDatesTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  selectedDatesList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  selectedDateText: {
-    fontSize: 14,
-    marginRight: 15,
-    marginBottom: 5,
   },
   modalOverlay: {
     flex: 1,
@@ -789,5 +1266,144 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     width: 200,
     textAlign: 'center',
+  },
+  dayPickerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    width: '100%',
+  },
+  dayPickerButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    backgroundColor: '#f8f9fa',
+  },
+  dayPickerButtonSelected: {
+    backgroundColor: '#4285f4',
+    borderColor: '#4285f4',
+  },
+  dayPickerText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  dayPickerTextSelected: {
+    color: '#fff',
+  },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  timeInput: {
+    width: 80,
+    textAlign: 'center',
+  },
+  timeToText: {
+    marginHorizontal: 10,
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  colorPickerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    width: '100%',
+  },
+  colorPickerButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  colorPickerButtonSelected: {
+    borderColor: '#333',
+    borderWidth: 3,
+  },
+  parentTypeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 16,
+    width: '100%',
+  },
+  parentTypeButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    backgroundColor: '#f8f9fa',
+    flex: 0.45,
+  },
+  parentTypeButtonSelected: {
+    backgroundColor: '#4285f4',
+    borderColor: '#4285f4',
+  },
+  parentTypeText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+  },
+  parentTypeTextSelected: {
+    color: '#fff',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    zIndex: 1000,
+  },
+  fabText: {
+    fontSize: 24,
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  fabMenu: {
+    position: 'absolute',
+    bottom: 85,
+    right: 20,
+    borderRadius: 8,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    paddingVertical: 8,
+    minWidth: 200,
+    zIndex: 999,
+  },
+  fabMenuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    marginVertical: 2,
+    marginHorizontal: 8,
+  },
+  fabMenuItemText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  fabMenuOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 998,
   },
 });
