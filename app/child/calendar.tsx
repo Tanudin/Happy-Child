@@ -942,17 +942,18 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    justifyContent: 'flex-end', // Align calendar at bottom
+    flexDirection: 'column',
   },
   calendarSection: {
     height: 490, // Fixed height for exactly 6 weeks (40px header + 6 * 75px rows)
-    marginBottom: 0,
+    marginBottom: 20, // Add margin below calendar to separate from upcoming events
   },
   todoSection: {
-    flex: 1, // Take remaining space above calendar
-    paddingTop: 10,
+    flex: 1, // Take remaining space below calendar
+    paddingTop: 0, // Remove top padding since we have margin from calendar
     paddingHorizontal: 20,
-    paddingBottom: 10,
+    paddingBottom: 20,
+    minHeight: 150, // Reduce minimum height since it's now below calendar
   },
   todoTitle: {
     fontSize: 18,
