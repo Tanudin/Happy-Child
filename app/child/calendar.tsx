@@ -127,47 +127,34 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
     const year = date.getFullYear();
     const month = date.getMonth();
     const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const daysInMonth = lastDay.getDate();
     
     // Adjust for Monday start (0 = Sunday, 1 = Monday, etc.)
     // Convert Sunday (0) to 6, Monday (1) to 0, etc.
     const startingDayOfWeek = (firstDay.getDay() + 6) % 7;
-    const endingDayOfWeek = (lastDay.getDay() + 6) % 7;
 
     const weeks = [];
-    let currentWeek = [];
+    let currentDate = new Date(firstDay);
     
-    // Add days from previous month only if needed (not a full week)
-    if (startingDayOfWeek > 0) {
-      const prevMonth = new Date(year, month - 1, 0);
-      const prevMonthDays = prevMonth.getDate();
-      for (let i = startingDayOfWeek - 1; i >= 0; i--) {
-        const prevDate = new Date(year, month - 1, prevMonthDays - i);
-        currentWeek.push({ date: prevDate, isCurrentMonth: false });
-      }
-    }
+    // Go back to the Monday of the week containing the first day
+    currentDate.setDate(currentDate.getDate() - startingDayOfWeek);
     
-    // Add all days of the current month
-    for (let day = 1; day <= daysInMonth; day++) {
-      const currentDate = new Date(year, month, day);
-      currentWeek.push({ date: currentDate, isCurrentMonth: true });
+    // Generate exactly 6 weeks (42 days)
+    for (let weekIndex = 0; weekIndex < 6; weekIndex++) {
+      const currentWeek = [];
       
-      // If we've completed a week (7 days), push it to weeks array
-      if (currentWeek.length === 7) {
-        weeks.push(currentWeek);
-        currentWeek = [];
+      for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const dateForCell = new Date(currentDate);
+        const isCurrentMonth = dateForCell.getMonth() === month;
+        
+        currentWeek.push({ 
+          date: dateForCell, 
+          isCurrentMonth: isCurrentMonth 
+        });
+        
+        // Move to next day
+        currentDate.setDate(currentDate.getDate() + 1);
       }
-    }
-    
-    // Add days from next month only if needed to complete the last week
-    if (currentWeek.length > 0) {
-      let nextMonthDay = 1;
-      while (currentWeek.length < 7) {
-        const nextDate = new Date(year, month + 1, nextMonthDay);
-        currentWeek.push({ date: nextDate, isCurrentMonth: false });
-        nextMonthDay++;
-      }
+      
       weeks.push(currentWeek);
     }
     
@@ -198,34 +185,11 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
     const isFirstInSequence = currentDayIndex === 0 || sortedDays[currentDayIndex - 1] !== dayOfWeek - 1;
     const isLastInSequence = currentDayIndex === sortedDays.length - 1 || sortedDays[currentDayIndex + 1] !== dayOfWeek + 1;
     
-    let borderRadius = 6; // Default radius
-    let marginHorizontal = 2; // Default margin
-
-    // Adjust for connected bars
-    if (!isFirstInSequence && !isLastInSequence) {
-      // Middle of sequence - no radius, no margin
-      borderRadius = 0;
-      marginHorizontal = 0;
-    } else if (!isFirstInSequence) {
-      // Last in sequence - round right only, no left margin
-      borderRadius = 0;
-      marginHorizontal = 0;
-    } else if (!isLastInSequence) {
-      // First in sequence - round left only, no right margin
-      borderRadius = 0;
-      marginHorizontal = 0;
-    }
-
     return {
-      borderRadius: isFirstInSequence && isLastInSequence ? 6 : 
-                   isFirstInSequence ? 6 : 
-                   isLastInSequence ? 6 : 0,
-      marginLeft: isFirstInSequence ? 2 : 0,
-      marginRight: isLastInSequence ? 2 : 0,
-      borderTopLeftRadius: isFirstInSequence ? 6 : 0,
-      borderBottomLeftRadius: isFirstInSequence ? 6 : 0,
-      borderTopRightRadius: isLastInSequence ? 6 : 0,
-      borderBottomRightRadius: isLastInSequence ? 6 : 0,
+      borderTopLeftRadius: isFirstInSequence ? 2 : 0,
+      borderBottomLeftRadius: isFirstInSequence ? 2 : 0,
+      borderTopRightRadius: isLastInSequence ? 2 : 0,
+      borderBottomRightRadius: isLastInSequence ? 2 : 0,
     };
   };
 
@@ -519,30 +483,25 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
         <TouchableOpacity onPress={onCancel} style={styles.backButton}>
           <Text style={[styles.backButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>‹ Back</Text>
         </TouchableOpacity>
-        <Text style={[styles.childName, { color: Colors[colorScheme ?? 'light'].text }]}>
-          {childName}
-        </Text>
+        <View style={styles.monthContainer}>
+          <Text style={[styles.monthText, { color: Colors[colorScheme ?? 'light'].text }]}>
+            {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+          </Text>
+          <TouchableOpacity onPress={() => navigateMonth('prev')} style={styles.monthNavLeft}>
+            <Text style={[styles.monthNavText, { color: Colors[colorScheme ?? 'light'].tint }]}>‹</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigateMonth('next')} style={styles.monthNavRight}>
+            <Text style={[styles.monthNavText, { color: Colors[colorScheme ?? 'light'].tint }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.headerSpacer} />
       </View>
       
       <View style={styles.content}>
         <View style={styles.calendarSection}>
-          <View style={styles.monthHeader}>
-            <TouchableOpacity onPress={() => navigateMonth('prev')} style={styles.navButton}>
-              <Text style={[styles.navButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>‹</Text>
-            </TouchableOpacity>
-            <Text style={[styles.monthText, { color: Colors[colorScheme ?? 'light'].text }]}>
-              {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
-            </Text>
-            <TouchableOpacity onPress={() => navigateMonth('next')} style={styles.navButton}>
-              <Text style={[styles.navButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>›</Text>
-            </TouchableOpacity>
-          </View>
-
           <View style={styles.calendarContainer}>
             <View style={styles.dayNamesRow}>
-              <View style={styles.weekNumberContainer}>
-                <Text style={[styles.weekNumber, { color: 'transparent' }]}>W</Text>
-              </View>
+              <View style={styles.weekNumberSpacer}></View>
               {dayNames.map(dayName => (
                 <Text key={dayName} style={[styles.dayName, { color: Colors[colorScheme ?? 'light'].text }]}>
                   {dayName}
@@ -580,20 +539,15 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
                             }
                           ]
                         ]}
-                        onPress={() => isCurrentMonth && handleShowActivityModal(dateObj.date)}
-                        disabled={!isCurrentMonth}
+                        onPress={() => handleShowActivityModal(dateObj.date)}
                       >
                         <View style={styles.dayCellContent}>
-                          {recurringEvent && isCurrentMonth && (
+                          {recurringEvent && (
                             <View style={[
                               styles.recurringIndicator, 
                               { backgroundColor: recurringEvent.color },
                               custodyBarStyle
-                            ]}>
-                              <Text style={styles.recurringText} numberOfLines={1}>
-                                {recurringEvent.parent_name}
-                              </Text>
-                            </View>
+                            ]} />
                           )}
                           <Text
                             style={[
@@ -601,13 +555,12 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
                               !isCurrentMonth && styles.otherMonthText,
                               selectedInfo
                                 ? { color: Colors[colorScheme ?? 'light'].calendarSelectedText, fontWeight: 'bold' }
-                                : { color: Colors[colorScheme ?? 'light'].text },
-                              recurringEvent && { marginTop: 2 } // Add margin when recurring event is present
+                                : { color: Colors[colorScheme ?? 'light'].text }
                             ]}
                           >
                             {dateObj.date.getDate()}
                           </Text>
-                          {selectedInfo?.activity && isCurrentMonth && (
+                          {selectedInfo?.activity && (
                             <Text
                               style={[
                                 styles.activityText,
@@ -632,7 +585,7 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
 
         <View style={styles.todoSection}>
           <Text style={[styles.todoTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
-            Upcoming Events
+            Upcoming Events for {childName}
           </Text>
           <ScrollView style={styles.todoList} showsVerticalScrollIndicator={false}>
             {Array.from(selectedDates.values())
@@ -989,15 +942,17 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    justifyContent: 'flex-end', // Align calendar at bottom
   },
   calendarSection: {
-    flex: 1, // Take up most of the screen like in the image
-    marginBottom: 10,
+    height: 490, // Fixed height for exactly 6 weeks (40px header + 6 * 75px rows)
+    marginBottom: 0,
   },
   todoSection: {
-    height: 150, // Fixed height for the bottom section
+    flex: 1, // Take remaining space above calendar
     paddingTop: 10,
-    paddingHorizontal: 20, // Add horizontal padding to todo section
+    paddingHorizontal: 20,
+    paddingBottom: 10,
   },
   todoTitle: {
     fontSize: 18,
@@ -1056,6 +1011,38 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     paddingHorizontal: 20, // Add horizontal padding back to header
   },
+  monthContainer: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+  },
+  monthNavLeft: {
+    position: 'absolute',
+    left: 0,
+    top: -5,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+  },
+  monthNavRight: {
+    position: 'absolute',
+    right: 0,
+    top: -5,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+  },
+  monthNavText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
   childName: {
     fontSize: 16,
     fontWeight: '600',
@@ -1089,32 +1076,36 @@ const styles = StyleSheet.create({
   monthText: {
     fontSize: 18,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
   dayNamesRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: 0, // Remove margin for tight spacing
-    paddingHorizontal: 0, // Remove horizontal padding for full width
-    paddingVertical: 8, // Reduced vertical padding
-    backgroundColor: '#f8f9fa',
+    height: 40,
+    paddingHorizontal: 0,
+    paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
+    borderBottomColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
   },
   weekRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
-    minHeight: 50, // Reduced height
+    borderBottomColor: '#e5e7eb',
+    height: 75,
   },
   weekNumberContainer: {
-    width: 30, // Reduced from 40 to 30
+    width: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10, // Reduced padding
-    backgroundColor: '#f1f3f4',
+    paddingVertical: 10,
+    backgroundColor: '#f9fafb',
     borderRightWidth: 1,
-    borderRightColor: '#e9ecef',
+    borderRightColor: '#e5e7eb',
+  },
+  weekNumberSpacer: {
+    width: 30, // Same width as weekNumberContainer to maintain alignment
   },
   weekNumber: {
     fontSize: 10, // Reduced from 12 to 10
@@ -1129,9 +1120,8 @@ const styles = StyleSheet.create({
   },
   calendarContainer: {
     backgroundColor: '#ffffff',
-    borderRadius: 0, // Remove rounded corners for full-screen look
-    padding: 0, // Remove padding for full-screen
-    margin: 0, // Remove margins for full-screen
+    borderRadius: 8,
+    margin: 16,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -1140,22 +1130,24 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 5,
-    flex: 1, // Take up all available space
+    height: 490,
+    overflow: 'hidden',
   },
   calendarGrid: {
-    flexDirection: 'column', // Changed to column to stack weeks
+    flexDirection: 'column',
     flex: 1,
+    backgroundColor: '#ffffff',
   },
   dayCell: {
-    flex: 1, // Use flex for equal distribution
-    aspectRatio: 1, // Keep cells square
-    justifyContent: 'center',
+    flex: 1,
+    height: 75,
+    justifyContent: 'flex-start',
     alignItems: 'center',
     borderRightWidth: 1,
-    borderRightColor: '#e9ecef',
+    borderRightColor: '#e5e7eb',
     backgroundColor: '#ffffff',
-    minHeight: 50, // Reduced minimum height
-    paddingVertical: 4, // Add small padding
+    paddingTop: 4,
+    position: 'relative',
   },
   emptyDay: {
     backgroundColor: 'transparent',
@@ -1165,16 +1157,19 @@ const styles = StyleSheet.create({
     borderWidth: 0, // Remove border, use background color only
   },
   dayText: {
-    fontSize: 14, // Reduced from 16 for smaller appearance
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 0,
+    textAlign: 'center',
   },
   otherMonthDay: {
     backgroundColor: '#f8f9fa',
     borderWidth: 0,
-    opacity: 0.6,
+    opacity: 0.4, // Reduced opacity to make other month dates less prominent
   },
   otherMonthText: {
     color: '#999999',
-    opacity: 0.6,
+    opacity: 0.5, // Reduced opacity for better visual separation
   },
   selectedDayText: {
     color: '#fff',
@@ -1184,31 +1179,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     height: '100%',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 8,
   },
   recurringIndicator: {
     position: 'absolute',
-    top: 2,
-    left: 2,
-    right: 2,
-    height: 12,
-    borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    opacity: 0.8,
-    zIndex: 1, // Ensure it appears above other elements
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    opacity: 0.9,
+    zIndex: 1,
   },
   recurringText: {
-    fontSize: 8,
+    fontSize: 9, // Increased from 8 for better readability
     fontWeight: 'bold',
     color: '#ffffff',
     textAlign: 'center',
   },
   activityText: {
-    fontSize: 9, // Reduced from 10 to keep proportional
-    marginTop: 2,
+    fontSize: 10,
+    marginTop: 4,
     textAlign: 'center',
     width: '100%',
+    paddingHorizontal: 2,
   },
   selectedActivityText: {
     color: '#fff',
