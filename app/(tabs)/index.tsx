@@ -245,7 +245,7 @@ export default function HomeScreen() {
           style={[styles.addButton, { borderColor: Colors[colorScheme ?? 'light'].primary }]}
           onPress={() => setModalVisible(true)}
         >
-          <Text style={[styles.addButtonText, { color: Colors[colorScheme ?? 'light'].primary }]}>Add New Item</Text>
+          <Text style={[styles.addButtonText, { color: Colors[colorScheme ?? 'light'].primary }]}>Add Child</Text>
         </TouchableOpacity>
       </View>
       <Modal

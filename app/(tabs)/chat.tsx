@@ -3,17 +3,17 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { supabase } from '@/lib/supabase';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    Alert,
-    FlatList,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 interface Friend {
@@ -24,6 +24,15 @@ interface Friend {
   friendship_id: string;
   conversation_id?: string;
   last_message_at?: string;
+}
+
+interface FriendRequest {
+  id: string;
+  requester_id: string;
+  display_name: string;
+  email: string;
+  avatar_url?: string;
+  created_at: string;
 }
 
 interface ChatMessage {
@@ -47,6 +56,7 @@ interface UserProfile {
 export default function ChatScreen() {
   const colorScheme = useColorScheme();
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -124,12 +134,46 @@ export default function ChatScreen() {
       }
       
       setCurrentUser(userData.user);
+
+      // Check if user profile exists, create one if it doesn't
+      await ensureUserProfileExists(userData.user);
+      
       await loadFriends(userData.user.id);
+      await loadFriendRequests(userData.user.id);
     } catch (error) {
       console.error('Error loading user and friends:', error);
       Alert.alert('Error', 'Failed to load friends');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const ensureUserProfileExists = async (user: any) => {
+    try {
+      // Check if profile exists
+      const { data: existingProfile, error: checkError } = await supabase
+        .from('user_profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+
+      // If profile doesn't exist, create one
+      if (checkError && checkError.code === 'PGRST116') { // No rows returned
+        const { error: createError } = await supabase
+          .from('user_profiles')
+          .insert({
+            user_id: user.id,
+            display_name: user.email?.split('@')[0] || 'User',
+            email: user.email || '',
+            is_searchable: true
+          });
+
+        if (createError) {
+          console.error('Error creating user profile:', createError);
+        }
+      }
+    } catch (error) {
+      console.error('Error ensuring user profile exists:', error);
     }
   };
 
@@ -156,35 +200,38 @@ export default function ChatScreen() {
           ? friendship.addressee_id 
           : friendship.requester_id;
 
-        // Get friend's profile
-        const { data: profileData, error: profileError } = await supabase
-          .from('user_profiles')
-          .select('user_id, display_name, email, avatar_url')
-          .eq('user_id', friendUserId)
-          .single();
+        try {
+          // Ensure friend has a profile (create one if needed)
+          const { data: profileData, error: profileError } = await supabase
+            .rpc('ensure_user_profile_exists', { target_user_id: friendUserId });
 
-        if (!profileError && profileData) {
-          // Get or create conversation between users
-          const { data: conversationData, error: conversationError } = await supabase
-            .rpc('get_or_create_direct_conversation', {
-              user1_id: userId,
-              user2_id: friendUserId
+          if (!profileError && profileData) {
+            // Get or create conversation between users
+            const { data: conversationData, error: conversationError } = await supabase
+              .rpc('get_or_create_direct_conversation', {
+                user1_id: userId,
+                user2_id: friendUserId
+              });
+
+            let conversationId = null;
+            if (!conversationError && conversationData) {
+              conversationId = conversationData;
+            }
+
+            friendsData.push({
+              id: profileData.user_id,
+              display_name: profileData.display_name,
+              email: profileData.email,
+              avatar_url: profileData.avatar_url,
+              friendship_id: friendship.id,
+              conversation_id: conversationId,
+              last_message_at: undefined
             });
-
-          let conversationId = null;
-          if (!conversationError && conversationData) {
-            conversationId = conversationData;
+          } else {
+            console.error(`Error ensuring profile for friend ${friendUserId}:`, profileError);
           }
-
-          friendsData.push({
-            id: profileData.user_id,
-            display_name: profileData.display_name,
-            email: profileData.email,
-            avatar_url: profileData.avatar_url,
-            friendship_id: friendship.id,
-            conversation_id: conversationId,
-            last_message_at: undefined
-          });
+        } catch (error) {
+          console.error(`Error processing friend ${friendUserId}:`, error);
         }
       }
 
@@ -196,6 +243,52 @@ export default function ChatScreen() {
       }
     } catch (error) {
       console.error('Error loading friends:', error);
+    }
+  };
+
+  const loadFriendRequests = async (userId: string) => {
+    try {
+      // Get pending friend requests where current user is the addressee
+      const { data: requestsData, error: requestsError } = await supabase
+        .from('friendships')
+        .select('id, requester_id, created_at')
+        .eq('addressee_id', userId)
+        .eq('status', 'pending');
+
+      if (requestsError) {
+        console.error('Error loading friend requests:', requestsError);
+        return;
+      }
+
+      // Get profile data for each requester
+      const requestsWithProfiles: FriendRequest[] = [];
+      
+      for (const request of requestsData || []) {
+        try {
+          // Ensure requester has a profile (create one if needed)
+          const { data: profileData, error: profileError } = await supabase
+            .rpc('ensure_user_profile_exists', { target_user_id: request.requester_id });
+
+          if (!profileError && profileData) {
+            requestsWithProfiles.push({
+              id: request.id,
+              requester_id: request.requester_id,
+              display_name: profileData.display_name,
+              email: profileData.email,
+              avatar_url: profileData.avatar_url,
+              created_at: request.created_at
+            });
+          } else {
+            console.error(`Error ensuring profile for requester ${request.requester_id}:`, profileError);
+          }
+        } catch (error) {
+          console.error(`Error processing friend request ${request.id}:`, error);
+        }
+      }
+
+      setFriendRequests(requestsWithProfiles);
+    } catch (error) {
+      console.error('Error loading friend requests:', error);
     }
   };
 
@@ -268,12 +361,13 @@ export default function ChatScreen() {
 
     try {
       setSearching(true);
+      
+      // Use the server-side function to search for users and create profiles if needed
       const { data, error } = await supabase
-        .from('user_profiles')
-        .select('user_id, display_name, email, avatar_url')
-        .eq('is_searchable', true)
-        .neq('user_id', currentUser?.id)
-        .ilike('email', `%${searchQuery.trim()}%`);
+        .rpc('search_users_by_email', {
+          search_email: searchQuery.trim(),
+          current_user_id: currentUser?.id
+        });
 
       if (error) {
         console.error('Error searching users:', error);
@@ -281,12 +375,18 @@ export default function ChatScreen() {
         return;
       }
 
-      setSearchResults((data || []).map(profile => ({
-        id: profile.user_id,
-        display_name: profile.display_name,
-        email: profile.email,
-        avatar_url: profile.avatar_url
-      })));
+      const results: UserProfile[] = (data || []).map((user: any) => ({
+        id: user.user_id,
+        display_name: user.display_name,
+        email: user.email,
+        avatar_url: user.avatar_url
+      }));
+
+      setSearchResults(results);
+
+      if (results.length === 0) {
+        console.log('No users found with that email');
+      }
     } catch (error) {
       console.error('Error searching users:', error);
       Alert.alert('Error', 'Failed to search users');
@@ -324,6 +424,59 @@ export default function ChatScreen() {
     } catch (error) {
       console.error('Error sending friend request:', error);
       Alert.alert('Error', 'Failed to send friend request');
+    }
+  };
+
+  const acceptFriendRequest = async (requestId: string, requesterId: string) => {
+    try {
+      // Update friendship status to accepted
+      const { error } = await supabase
+        .from('friendships')
+        .update({ status: 'accepted' })
+        .eq('id', requestId);
+
+      if (error) {
+        console.error('Error accepting friend request:', error);
+        Alert.alert('Error', 'Failed to accept friend request');
+        return;
+      }
+
+      Alert.alert('Success', 'Friend request accepted!');
+      
+      // Reload friends and friend requests
+      if (currentUser) {
+        await loadFriends(currentUser.id);
+        await loadFriendRequests(currentUser.id);
+      }
+    } catch (error) {
+      console.error('Error accepting friend request:', error);
+      Alert.alert('Error', 'Failed to accept friend request');
+    }
+  };
+
+  const denyFriendRequest = async (requestId: string) => {
+    try {
+      // Delete the friendship request
+      const { error } = await supabase
+        .from('friendships')
+        .delete()
+        .eq('id', requestId);
+
+      if (error) {
+        console.error('Error denying friend request:', error);
+        Alert.alert('Error', 'Failed to deny friend request');
+        return;
+      }
+
+      Alert.alert('Success', 'Friend request denied');
+      
+      // Reload friend requests
+      if (currentUser) {
+        await loadFriendRequests(currentUser.id);
+      }
+    } catch (error) {
+      console.error('Error denying friend request:', error);
+      Alert.alert('Error', 'Failed to deny friend request');
     }
   };
 
@@ -398,6 +551,36 @@ export default function ChatScreen() {
     </TouchableOpacity>
   );
 
+  const renderFriendRequest = ({ item }: { item: FriendRequest }) => (
+    <View style={[styles.friendRequestItem, { borderBottomColor: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+      <View style={styles.friendRequestInfo}>
+        <Text style={[styles.friendRequestName, { color: Colors[colorScheme ?? 'light'].text }]}>
+          {item.display_name}
+        </Text>
+        <Text style={[styles.friendRequestEmail, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+          {item.email}
+        </Text>
+        <Text style={[styles.friendRequestTime, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+          {new Date(item.created_at).toLocaleDateString()}
+        </Text>
+      </View>
+      <View style={styles.friendRequestActions}>
+        <TouchableOpacity 
+          style={[styles.acceptButton, { backgroundColor: '#22c55e' }]}
+          onPress={() => acceptFriendRequest(item.id, item.requester_id)}
+        >
+          <Text style={styles.actionButtonText}>Accept</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.denyButton, { backgroundColor: '#ef4444' }]}
+          onPress={() => denyFriendRequest(item.id)}
+        >
+          <Text style={styles.actionButtonText}>Deny</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
@@ -462,6 +645,22 @@ export default function ChatScreen() {
           </View>
         )}
       </View>
+
+      {/* Friend Requests */}
+      {friendRequests.length > 0 && (
+        <View style={[styles.friendRequestsSection, { borderBottomColor: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+          <Text style={[styles.friendRequestsTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
+            Friend Requests ({friendRequests.length})
+          </Text>
+          <FlatList
+            data={friendRequests}
+            renderItem={renderFriendRequest}
+            keyExtractor={(item) => item.id}
+            style={styles.friendRequestsList}
+            scrollEnabled={false}
+          />
+        </View>
+      )}
 
       {/* Messages */}
       {selectedFriend && (
@@ -790,5 +989,59 @@ const styles = StyleSheet.create({
   addFriendButtonText: {
     color: 'white',
     fontWeight: 'bold',
+  },
+  friendRequestItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    paddingHorizontal: 16,
+  },
+  friendRequestInfo: {
+    flex: 1,
+  },
+  friendRequestName: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  friendRequestEmail: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  friendRequestTime: {
+    fontSize: 12,
+  },
+  friendRequestActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  acceptButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  denyButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  actionButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  friendRequestsSection: {
+    borderBottomWidth: 1,
+    paddingVertical: 8,
+  },
+  friendRequestsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  friendRequestsList: {
+    maxHeight: 200,
   },
 });

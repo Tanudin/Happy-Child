@@ -30,26 +30,33 @@ interface CalendarProps {
 
 export default function Calendar({ childName, childId, onConfirm, onCancel }: CalendarProps) {
   const colorScheme = useColorScheme();
-  const [selectedDates, setSelectedDates] = useState<Map<string, { date: Date; activity: string }>>(new Map());
+  const [selectedDates, setSelectedDates] = useState<Map<string, { date: Date; activities: string[] }>>(new Map());
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [recurringEvents, setRecurringEvents] = useState<RecurringEvent[]>([]);
   const [selectedActivity, setSelectedActivity] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
-  const [modalActivity, setModalActivity] = useState<{date: Date, activity: string} | null>(null);
+  const [modalActivity, setModalActivity] = useState<{date: Date, activities: string[]} | null>(null);
   const [editingActivity, setEditingActivity] = useState(false);
   const [editActivityValue, setEditActivityValue] = useState('');
+  const [editingActivityIndex, setEditingActivityIndex] = useState<number | null>(null);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [createModalDate, setCreateModalDate] = useState<Date | null>(null);
   const [createActivityValue, setCreateActivityValue] = useState('');
   const [recurringModalVisible, setRecurringModalVisible] = useState(false);
   const [fabMenuVisible, setFabMenuVisible] = useState(false);
-  const [newRecurringEvent, setNewRecurringEvent] = useState({
-    days_of_week: [] as number[],
-    parent_name: '',
-    parent_type: 'mom' as 'mom' | 'dad',
-    color: '#4285f4'
+  const [custodySchedule, setCustodySchedule] = useState({
+    mom: {
+      days: [] as number[],
+      name: 'Mom',
+      color: '#ea4335'
+    },
+    dad: {
+      days: [] as number[],
+      name: 'Dad',
+      color: '#4285f4'
+    }
   });
 
   useEffect(() => {
@@ -74,6 +81,26 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
       }
 
       setRecurringEvents(data || []);
+      
+      // Initialize custody schedule from existing data
+      const newCustodySchedule = {
+        mom: { days: [] as number[], name: 'Mom', color: '#ea4335' },
+        dad: { days: [] as number[], name: 'Dad', color: '#4285f4' }
+      };
+      
+      if (data) {
+        data.forEach(schedule => {
+          if (schedule.parent_type === 'mom') {
+            newCustodySchedule.mom.days = schedule.days_of_week || [];
+            newCustodySchedule.mom.name = schedule.parent_name || 'Mom';
+          } else if (schedule.parent_type === 'dad') {
+            newCustodySchedule.dad.days = schedule.days_of_week || [];
+            newCustodySchedule.dad.name = schedule.parent_name || 'Dad';
+          }
+        });
+      }
+      
+      setCustodySchedule(newCustodySchedule);
     } catch (error) {
       console.error('Error fetching custody schedules:', error);
     }
@@ -105,14 +132,23 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
 
       setEvents(data);
       
-      const newSelectedDates = new Map<string, { date: Date; activity: string }>();
+      const newSelectedDates = new Map<string, { date: Date; activities: string[] }>();
       data.forEach(event => {
         const eventDate = new Date(event.start_time);
         const dateKey = eventDate.toISOString().split('T')[0];
-        newSelectedDates.set(dateKey, {
-          date: new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate()),
-          activity: event.activity_name || ''
-        });
+        const dateValue = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate());
+        
+        if (newSelectedDates.has(dateKey)) {
+          // Add to existing activities array
+          const existing = newSelectedDates.get(dateKey)!;
+          existing.activities.push(event.activity_name || '');
+        } else {
+          // Create new entry
+          newSelectedDates.set(dateKey, {
+            date: dateValue,
+            activities: [event.activity_name || '']
+          });
+        }
       });
 
       setSelectedDates(newSelectedDates);
@@ -193,42 +229,59 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
     };
   };
 
-  const saveRecurringEvent = async () => {
+  const saveCustodySchedule = async () => {
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData?.user?.id) return;
 
-      if (newRecurringEvent.days_of_week.length === 0 || !newRecurringEvent.parent_name.trim()) {
-        Alert.alert('Error', 'Please select at least one day and enter parent name.');
-        return;
-      }
-
-      const { error } = await supabase
+      // Delete existing custody schedules for this child
+      await supabase
         .from('custody_schedules')
-        .insert({
+        .delete()
+        .eq('child_id', childId);
+
+      // Insert new schedules for both mom and dad if they have days assigned
+      const schedulesToInsert = [];
+      
+      if (custodySchedule.mom.days.length > 0) {
+        schedulesToInsert.push({
           child_id: childId,
           user_id: userData.user.id,
-          days_of_week: newRecurringEvent.days_of_week,
-          parent_name: newRecurringEvent.parent_name,
-          parent_type: newRecurringEvent.parent_type,
-          color: newRecurringEvent.color
+          days_of_week: custodySchedule.mom.days,
+          parent_name: custodySchedule.mom.name,
+          parent_type: 'mom',
+          color: custodySchedule.mom.color
         });
+      }
+      
+      if (custodySchedule.dad.days.length > 0) {
+        schedulesToInsert.push({
+          child_id: childId,
+          user_id: userData.user.id,
+          days_of_week: custodySchedule.dad.days,
+          parent_name: custodySchedule.dad.name,
+          parent_type: 'dad',
+          color: custodySchedule.dad.color
+        });
+      }
 
-      if (error) {
-        console.error('Error saving custody schedule:', error);
-        return;
+      if (schedulesToInsert.length > 0) {
+        const { error } = await supabase
+          .from('custody_schedules')
+          .insert(schedulesToInsert);
+
+        if (error) {
+          console.error('Error saving custody schedule:', error);
+          Alert.alert('Error', 'Failed to save custody schedule.');
+          return;
+        }
       }
 
       await fetchRecurringEvents();
       setRecurringModalVisible(false);
-      setNewRecurringEvent({
-        days_of_week: [],
-        parent_name: '',
-        parent_type: 'mom',
-        color: '#4285f4'
-      });
     } catch (error) {
       console.error('Error saving custody schedule:', error);
+      Alert.alert('Error', 'Failed to save custody schedule.');
     }
   };
 
@@ -272,7 +325,12 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
             onPress: async (activityName) => {
               setSelectedDates(prev => {
                 const newSelected = new Map(prev);
-                newSelected.set(dateKey, { date, activity: activityName || '' });
+                const existing = newSelected.get(dateKey);
+                if (existing) {
+                  existing.activities.push(activityName || '');
+                } else {
+                  newSelected.set(dateKey, { date, activities: [activityName || ''] });
+                }
                 return newSelected;
               });
               // Add to database immediately
@@ -339,16 +397,18 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
           .lte('start_time', dateRange.end);
       }
 
-      const events = Array.from(selectedDates.values()).map(({ date, activity }) => ({
-        child_id: childId,
-        user_id: userId,
-        start_time: new Date(date.getFullYear(), date.getMonth(), date.getDate(), 9, 0).toISOString(),
-        end_time: new Date(date.getFullYear(), date.getMonth(), date.getDate(), 17, 0).toISOString(),
-        event_type: 'scheduled',
-        activity_name: activity,
-        location: '',
-        notes: `${activity} scheduled for ${childName}`
-      }));
+      const events = Array.from(selectedDates.values()).flatMap(({ date, activities }) => 
+        activities.map(activity => ({
+          child_id: childId,
+          user_id: userId,
+          start_time: new Date(date.getFullYear(), date.getMonth(), date.getDate(), 9, 0).toISOString(),
+          end_time: new Date(date.getFullYear(), date.getMonth(), date.getDate(), 17, 0).toISOString(),
+          event_type: 'scheduled',
+          activity_name: activity,
+          location: '',
+          notes: `${activity} scheduled for ${childName}`
+        }))
+      );
 
       const { error } = await supabase
         .from('calendar_events')
@@ -368,50 +428,89 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
   };
 
   // Save edited activity
-  async function handleSaveActivityEdit() {
-    if (!modalActivity) return;
-    // Update in DB
+  async function handleSaveActivityEdit(activityIndex: number) {
+    if (!modalActivity || editingActivityIndex !== activityIndex) return;
+    
+    const oldActivity = modalActivity.activities[activityIndex];
     const startOfDay = new Date(modalActivity.date.getFullYear(), modalActivity.date.getMonth(), modalActivity.date.getDate(), 0, 0, 0);
     const endOfDay = new Date(modalActivity.date.getFullYear(), modalActivity.date.getMonth(), modalActivity.date.getDate(), 23, 59, 59);
+    
+    // Update in database - find the specific event and update it
     const { error } = await supabase
       .from('calendar_events')
       .update({ activity_name: editActivityValue, notes: `${editActivityValue} scheduled for ${childName}` })
       .eq('child_id', childId)
+      .eq('activity_name', oldActivity)
       .gte('start_time', startOfDay.toISOString())
       .lte('start_time', endOfDay.toISOString());
+    
     if (!error) {
+      // Update UI state
       setSelectedDates(prev => {
         const newSelected = new Map(prev);
         const dateKey = modalActivity.date.toISOString().split('T')[0];
-        if (newSelected.has(dateKey)) {
-          newSelected.set(dateKey, { date: modalActivity.date, activity: editActivityValue });
+        const existing = newSelected.get(dateKey);
+        if (existing) {
+          existing.activities[activityIndex] = editActivityValue;
         }
         return newSelected;
       });
-      setModalActivity({ ...modalActivity, activity: editActivityValue });
-      setEditingActivity(false);
+      
+      // Update modal state
+      const updatedActivities = [...modalActivity.activities];
+      updatedActivities[activityIndex] = editActivityValue;
+      setModalActivity({ ...modalActivity, activities: updatedActivities });
+      
+      setEditingActivityIndex(null);
+      setEditActivityValue('');
     }
   }
 
-  // Remove event from DB and UI
-  async function handleRemoveActivity() {
+  // Remove individual activity from DB and UI
+  async function handleRemoveActivity(activityIndex: number) {
     if (!modalActivity) return;
+    
+    const activityToRemove = modalActivity.activities[activityIndex];
     const startOfDay = new Date(modalActivity.date.getFullYear(), modalActivity.date.getMonth(), modalActivity.date.getDate(), 0, 0, 0);
     const endOfDay = new Date(modalActivity.date.getFullYear(), modalActivity.date.getMonth(), modalActivity.date.getDate(), 23, 59, 59);
+    
+    // Remove from database
     await supabase
       .from('calendar_events')
       .delete()
       .eq('child_id', childId)
+      .eq('activity_name', activityToRemove)
       .gte('start_time', startOfDay.toISOString())
       .lte('start_time', endOfDay.toISOString());
+    
+    // Update UI state
     setSelectedDates(prev => {
       const newSelected = new Map(prev);
       const dateKey = modalActivity.date.toISOString().split('T')[0];
-      newSelected.delete(dateKey);
+      const existing = newSelected.get(dateKey);
+      if (existing) {
+        existing.activities.splice(activityIndex, 1);
+        if (existing.activities.length === 0) {
+          newSelected.delete(dateKey);
+        }
+      }
       return newSelected;
     });
-    setModalVisible(false);
-    setEditingActivity(false);
+    
+    // Update modal state
+    const updatedActivities = [...modalActivity.activities];
+    updatedActivities.splice(activityIndex, 1);
+    
+    if (updatedActivities.length === 0) {
+      // Close modal if no activities left
+      setModalVisible(false);
+      setEditingActivity(false);
+    } else {
+      setModalActivity({ ...modalActivity, activities: updatedActivities });
+    }
+    
+    setEditingActivityIndex(null);
+    setEditActivityValue('');
   }
 
   // Show modal with activity info when pressing a selected date
@@ -448,7 +547,12 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
     });
     setSelectedDates(prev => {
       const newSelected = new Map(prev);
-      newSelected.set(dateKey, { date, activity: createActivityValue });
+      const existing = newSelected.get(dateKey);
+      if (existing) {
+        existing.activities.push(createActivityValue);
+      } else {
+        newSelected.set(dateKey, { date, activities: [createActivityValue] });
+      }
       return newSelected;
     });
     setCreateModalVisible(false);
@@ -529,15 +633,7 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
                         key={dayIndex}
                         style={[
                           styles.dayCell,
-                          !isCurrentMonth && styles.otherMonthDay,
-                          selectedInfo && [
-                            styles.selectedDay,
-                            {
-                              backgroundColor: Colors[colorScheme ?? 'light'].tint,
-                              borderColor: Colors[colorScheme ?? 'light'].tint,
-                              borderWidth: 2
-                            }
-                          ]
+                          !isCurrentMonth && styles.otherMonthDay
                         ]}
                         onPress={() => handleShowActivityModal(dateObj.date)}
                       >
@@ -553,25 +649,40 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
                             style={[
                               styles.dayText,
                               !isCurrentMonth && styles.otherMonthText,
-                              selectedInfo
-                                ? { color: Colors[colorScheme ?? 'light'].calendarSelectedText, fontWeight: 'bold' }
-                                : { color: Colors[colorScheme ?? 'light'].text }
+                              { color: Colors[colorScheme ?? 'light'].text }
                             ]}
                           >
                             {dateObj.date.getDate()}
                           </Text>
-                          {selectedInfo?.activity && (
-                            <Text
-                              style={[
-                                styles.activityText,
-                                selectedInfo
-                                  ? { color: Colors[colorScheme ?? 'light'].calendarSelectedText, fontWeight: 'bold' }
-                                  : { color: Colors[colorScheme ?? 'light'].text }
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {selectedInfo.activity}
-                            </Text>
+                          {selectedInfo?.activities && selectedInfo.activities.length > 0 && (
+                            <View style={styles.eventContainer}>
+                              {selectedInfo.activities.slice(0, 3).map((activity, index) => (
+                                <View key={index} style={[
+                                  styles.eventBadge,
+                                  { backgroundColor: Colors[colorScheme ?? 'light'].tint }
+                                ]}>
+                                  <Text
+                                    style={[
+                                      styles.eventBadgeText,
+                                      { color: Colors[colorScheme ?? 'light'].calendarSelectedText || '#fff' }
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {activity}
+                                  </Text>
+                                </View>
+                              ))}
+                              {selectedInfo.activities.length > 3 && (
+                                <View style={[
+                                  styles.eventBadge,
+                                  { backgroundColor: '#666' }
+                                ]}>
+                                  <Text style={styles.eventBadgeText}>
+                                    +{selectedInfo.activities.length - 3}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
                           )}
                         </View>
                       </TouchableOpacity>
@@ -599,7 +710,7 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
                     </Text>
                   </View>
                   <Text style={[styles.todoActivity, { color: Colors[colorScheme ?? 'light'].text }]}>
-                    {item.activity}
+                    {item.activities[0]}{item.activities.length > 1 ? ` (+${item.activities.length - 1} more)` : ''}
                   </Text>
                 </View>
               ))}
@@ -617,7 +728,12 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
         visible={modalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => { setModalVisible(false); setEditingActivity(false); }}
+        onRequestClose={() => { 
+          setModalVisible(false); 
+          setEditingActivity(false); 
+          setEditingActivityIndex(null);
+          setEditActivityValue('');
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContentBox}>
@@ -626,17 +742,52 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
               <>
                 <Text style={styles.modalLabel}>Date:</Text>
                 <Text style={styles.modalValue}>{modalActivity.date.toLocaleDateString()}</Text>
-                <Text style={styles.modalLabel}>Activity:</Text>
+                <Text style={styles.modalLabel}>Activities:</Text>
                 {editingActivity ? (
-                  <TextInput
-                    style={styles.modalInput}
-                    value={editActivityValue}
-                    onChangeText={setEditActivityValue}
-                    // Do not autoFocus to avoid keyboard/cursor issues on iPhone
-                    autoFocus={false}
-                  />
+                  <View style={styles.activitiesEditContainer}>
+                    {modalActivity.activities.map((activity, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={[
+                          styles.activityEditItem,
+                          editingActivityIndex === index && styles.activityEditItemSelected
+                        ]}
+                        onPress={() => {
+                          setEditingActivityIndex(index);
+                          setEditActivityValue(activity);
+                        }}
+                      >
+                        {editingActivityIndex === index ? (
+                          <View style={styles.activityEditRow}>
+                            <TextInput
+                              style={styles.activityEditInput}
+                              value={editActivityValue}
+                              onChangeText={setEditActivityValue}
+                              autoFocus={true}
+                            />
+                            <TouchableOpacity
+                              style={styles.saveActivityButton}
+                              onPress={() => handleSaveActivityEdit(index)}
+                            >
+                              <Text style={styles.saveActivityButtonText}>✓</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.removeActivityButton}
+                              onPress={() => handleRemoveActivity(index)}
+                            >
+                              <Text style={styles.removeActivityButtonText}>✗</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <Text style={styles.activityEditText}>• {activity}</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 ) : (
-                  <Text style={styles.modalValue}>{modalActivity.activity}</Text>
+                  modalActivity.activities.map((activity, index) => (
+                    <Text key={index} style={styles.modalValue}>• {activity}</Text>
+                  ))
                 )}
               </>
             )}
@@ -651,50 +802,45 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
                     shadowOpacity: 0.15,
                     shadowRadius: 4,
                     elevation: 2
-                  }]} onPress={handleSaveActivityEdit}>
-                    <Text style={[styles.modalActionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>Save</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.modalActionButton, {
-                    backgroundColor: '#ff4d4d',
-                    marginLeft: 10,
-                    borderColor: '#b30000',
-                    borderWidth: 2,
-                    shadowColor: '#b30000',
-                    shadowOpacity: 0.15,
-                    shadowRadius: 4,
-                    elevation: 2
-                  }]} onPress={handleRemoveActivity}>
-                    <Text style={[styles.modalActionButtonText, { color: '#fff' }]}>Remove</Text>
+                  }]} onPress={() => { 
+                    setEditingActivity(false); 
+                    setEditingActivityIndex(null);
+                  }}>
+                    <Text style={[styles.modalActionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>Done</Text>
                   </TouchableOpacity>
                 </>
               ) : (
-                <TouchableOpacity style={[styles.modalCloseButton, {
-                  backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground,
-                  borderColor: Colors[colorScheme ?? 'light'].tint,
-                  borderWidth: 2,
-                  shadowColor: Colors[colorScheme ?? 'light'].tint,
-                  shadowOpacity: 0.15,
-                  shadowRadius: 4,
-                  elevation: 2
-                }]} onPress={() => {
-                  setEditingActivity(true);
-                  setEditActivityValue(modalActivity?.activity || '');
-                }}>
-                  <Text style={[styles.modalActionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>Edit</Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity style={[styles.modalActionButton, {
+                    backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground,
+                    borderColor: Colors[colorScheme ?? 'light'].tint,
+                    borderWidth: 2,
+                    shadowColor: Colors[colorScheme ?? 'light'].tint,
+                    shadowOpacity: 0.15,
+                    shadowRadius: 4,
+                    elevation: 2
+                  }]} onPress={() => setEditingActivity(true)}>
+                    <Text style={[styles.modalActionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>Edit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.modalCloseButton, {
+                    marginLeft: 10,
+                    backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground,
+                    borderColor: Colors[colorScheme ?? 'light'].tint,
+                    borderWidth: 2,
+                    shadowColor: Colors[colorScheme ?? 'light'].tint,
+                    shadowOpacity: 0.15,
+                    shadowRadius: 4,
+                    elevation: 2
+                  }]} onPress={() => { 
+                    setModalVisible(false); 
+                    setEditingActivity(false); 
+                    setEditingActivityIndex(null);
+                    setEditActivityValue('');
+                  }}>
+                    <Text style={[styles.modalActionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>Close</Text>
+                  </TouchableOpacity>
+                </>
               )}
-              <TouchableOpacity style={[styles.modalCloseButton, {
-                marginLeft: 10,
-                backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground,
-                borderColor: Colors[colorScheme ?? 'light'].tint,
-                borderWidth: 2,
-                shadowColor: Colors[colorScheme ?? 'light'].tint,
-                shadowOpacity: 0.15,
-                shadowRadius: 4,
-                elevation: 2
-              }]} onPress={() => { setModalVisible(false); setEditingActivity(false); }}>
-                <Text style={[styles.modalActionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>Close</Text>
-              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -756,85 +902,72 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
         onRequestClose={() => setRecurringModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContentBox}>
-            <Text style={styles.modalTitle}>Set Custody Schedule</Text>
+          <View style={[styles.modalContentBox, { width: '90%' }]}>
+            <Text style={styles.modalTitle}>Edit Custody Schedule</Text>
             
-            <Text style={styles.modalLabel}>Select Days with this Parent:</Text>
-            <View style={styles.dayPickerRow}>
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => (
-                <TouchableOpacity
-                  key={day}
-                  style={[
-                    styles.dayPickerButton,
-                    newRecurringEvent.days_of_week.includes(index) && styles.dayPickerButtonSelected
-                  ]}
-                  onPress={() => {
-                    const updatedDays = newRecurringEvent.days_of_week.includes(index)
-                      ? newRecurringEvent.days_of_week.filter(d => d !== index)
-                      : [...newRecurringEvent.days_of_week, index];
-                    setNewRecurringEvent(prev => ({ ...prev, days_of_week: updatedDays }));
-                  }}
-                >
-                  <Text style={[
-                    styles.dayPickerText,
-                    newRecurringEvent.days_of_week.includes(index) && styles.dayPickerTextSelected
-                  ]}>
-                    {day}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            {/* Mom Section */}
+            <View style={styles.parentSection}>
+              <Text style={[styles.parentSectionTitle, { color: '#ea4335' }]}>Mom's Days</Text>
+              <View style={styles.dayPickerRow}>
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => (
+                  <TouchableOpacity
+                    key={`mom-${day}`}
+                    style={[
+                      styles.dayPickerButton,
+                      custodySchedule.mom.days.includes(index) && [styles.dayPickerButtonSelected, { backgroundColor: '#ea4335', borderColor: '#ea4335' }]
+                    ]}
+                    onPress={() => {
+                      const updatedDays = custodySchedule.mom.days.includes(index)
+                        ? custodySchedule.mom.days.filter((d: number) => d !== index)
+                        : [...custodySchedule.mom.days, index];
+                      setCustodySchedule(prev => ({ 
+                        ...prev, 
+                        mom: { ...prev.mom, days: updatedDays }
+                      }));
+                    }}
+                  >
+                    <Text style={[
+                      styles.dayPickerText,
+                      custodySchedule.mom.days.includes(index) && styles.dayPickerTextSelected
+                    ]}>
+                      {day}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
 
-            <Text style={styles.modalLabel}>Parent Type:</Text>
-            <View style={styles.parentTypeRow}>
-              <TouchableOpacity
-                style={[
-                  styles.parentTypeButton,
-                  newRecurringEvent.parent_type === 'mom' && styles.parentTypeButtonSelected
-                ]}
-                onPress={() => setNewRecurringEvent(prev => ({ 
-                  ...prev, 
-                  parent_type: 'mom',
-                  parent_name: 'Mom',
-                  color: '#ea4335' // Red for mom
-                }))}
-              >
-                <Text style={[
-                  styles.parentTypeText,
-                  newRecurringEvent.parent_type === 'mom' && styles.parentTypeTextSelected
-                ]}>
-                  Mom
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.parentTypeButton,
-                  newRecurringEvent.parent_type === 'dad' && styles.parentTypeButtonSelected
-                ]}
-                onPress={() => setNewRecurringEvent(prev => ({ 
-                  ...prev, 
-                  parent_type: 'dad',
-                  parent_name: 'Dad',
-                  color: '#4285f4' // Blue for dad
-                }))}
-              >
-                <Text style={[
-                  styles.parentTypeText,
-                  newRecurringEvent.parent_type === 'dad' && styles.parentTypeTextSelected
-                ]}>
-                  Dad
-                </Text>
-              </TouchableOpacity>
+            {/* Dad Section */}
+            <View style={styles.parentSection}>
+              <Text style={[styles.parentSectionTitle, { color: '#4285f4' }]}>Dad's Days</Text>
+              <View style={styles.dayPickerRow}>
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => (
+                  <TouchableOpacity
+                    key={`dad-${day}`}
+                    style={[
+                      styles.dayPickerButton,
+                      custodySchedule.dad.days.includes(index) && [styles.dayPickerButtonSelected, { backgroundColor: '#4285f4', borderColor: '#4285f4' }]
+                    ]}
+                    onPress={() => {
+                      const updatedDays = custodySchedule.dad.days.includes(index)
+                        ? custodySchedule.dad.days.filter((d: number) => d !== index)
+                        : [...custodySchedule.dad.days, index];
+                      setCustodySchedule(prev => ({ 
+                        ...prev, 
+                        dad: { ...prev.dad, days: updatedDays }
+                      }));
+                    }}
+                  >
+                    <Text style={[
+                      styles.dayPickerText,
+                      custodySchedule.dad.days.includes(index) && styles.dayPickerTextSelected
+                    ]}>
+                      {day}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
-
-            <Text style={styles.modalLabel}>Parent Name (Optional):</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={newRecurringEvent.parent_name}
-              onChangeText={(text) => setNewRecurringEvent(prev => ({ ...prev, parent_name: text }))}
-              placeholder={newRecurringEvent.parent_type === 'mom' ? 'Mom' : 'Dad'}
-              autoFocus={false}
-            />
 
             <View style={{ flexDirection: 'row', marginTop: 20, justifyContent: 'center', alignItems: 'center' }}>
               <TouchableOpacity style={[styles.modalActionButton, {
@@ -845,7 +978,7 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
                 shadowOpacity: 0.15,
                 shadowRadius: 4,
                 elevation: 2
-              }]} onPress={saveRecurringEvent}>
+              }]} onPress={saveCustodySchedule}>
                 <Text style={[styles.modalActionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>Save</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalCloseButton, {
@@ -892,29 +1025,7 @@ export default function Calendar({ childName, childId, onConfirm, onCancel }: Ca
               setRecurringModalVisible(true);
             }}
           >
-            <Text style={[styles.fabMenuItemText, { color: Colors[colorScheme ?? 'light'].text }]}>New Custody Schedule</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.fabMenuItem, { backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground }]}
-            onPress={() => {
-              setFabMenuVisible(false);
-              // Add functionality for editing existing schedules
-              Alert.alert('Edit Schedules', 'Feature coming soon!');
-            }}
-          >
-            <Text style={[styles.fabMenuItemText, { color: Colors[colorScheme ?? 'light'].text }]}>Edit Schedules</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.fabMenuItem, { backgroundColor: Colors[colorScheme ?? 'light'].buttonBackground }]}
-            onPress={() => {
-              setFabMenuVisible(false);
-              // Add functionality for deleting schedules
-              Alert.alert('Delete Schedules', 'Feature coming soon!');
-            }}
-          >
-            <Text style={[styles.fabMenuItemText, { color: Colors[colorScheme ?? 'light'].text }]}>Delete Schedules</Text>
+            <Text style={[styles.fabMenuItemText, { color: Colors[colorScheme ?? 'light'].text }]}>Edit Custody Schedule</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -1154,8 +1265,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   selectedDay: {
-    borderRadius: 0, // Remove border radius for clean look
-    borderWidth: 0, // Remove border, use background color only
+    borderRadius: 0, 
   },
   dayText: {
     fontSize: 16,
@@ -1204,6 +1314,28 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     width: '100%',
     paddingHorizontal: 2,
+  },
+  eventBadge: {
+    backgroundColor: '#4285f4',
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    marginTop: 2,
+    minWidth: 20,
+    maxWidth: '90%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eventContainer: {
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 2,
+  },
+  eventBadgeText: {
+    fontSize: 8,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
   },
   selectedActivityText: {
     color: '#fff',
@@ -1400,5 +1532,74 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 998,
+  },
+  parentSection: {
+    marginBottom: 20,
+    width: '100%',
+  },
+  parentSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  activitiesEditContainer: {
+    width: '100%',
+    maxHeight: 200,
+  },
+  activityEditItem: {
+    width: '100%',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginVertical: 2,
+    borderRadius: 6,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  activityEditItemSelected: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#2196f3',
+  },
+  activityEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+  },
+  activityEditInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 4,
+    padding: 8,
+    fontSize: 14,
+    marginRight: 8,
+  },
+  saveActivityButton: {
+    backgroundColor: '#4caf50',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 4,
+    marginRight: 4,
+  },
+  saveActivityButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  removeActivityButton: {
+    backgroundColor: '#f44336',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 4,
+  },
+  removeActivityButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  activityEditText: {
+    fontSize: 16,
+    color: '#333',
   },
 });

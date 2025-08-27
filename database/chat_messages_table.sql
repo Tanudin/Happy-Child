@@ -106,26 +106,33 @@ ALTER TABLE conversation_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
 
 -- Create RLS policies for user_profiles
+DROP POLICY IF EXISTS "Users can view all searchable profiles" ON user_profiles;
 CREATE POLICY "Users can view all searchable profiles" ON user_profiles
   FOR SELECT USING (is_searchable = true OR user_id = auth.uid());
 
+DROP POLICY IF EXISTS "Users can update their own profile" ON user_profiles;
 CREATE POLICY "Users can update their own profile" ON user_profiles
   FOR UPDATE USING (user_id = auth.uid());
 
+DROP POLICY IF EXISTS "Users can insert their own profile" ON user_profiles;
 CREATE POLICY "Users can insert their own profile" ON user_profiles
   FOR INSERT WITH CHECK (user_id = auth.uid());
 
 -- Create RLS policies for friendships
+DROP POLICY IF EXISTS "Users can view friendships they're involved in" ON friendships;
 CREATE POLICY "Users can view friendships they're involved in" ON friendships
   FOR SELECT USING (requester_id = auth.uid() OR addressee_id = auth.uid());
 
+DROP POLICY IF EXISTS "Users can create friendship requests" ON friendships;
 CREATE POLICY "Users can create friendship requests" ON friendships
   FOR INSERT WITH CHECK (requester_id = auth.uid());
 
+DROP POLICY IF EXISTS "Users can update friendships they're involved in" ON friendships;
 CREATE POLICY "Users can update friendships they're involved in" ON friendships
   FOR UPDATE USING (requester_id = auth.uid() OR addressee_id = auth.uid());
 
 -- Create RLS policies for conversations
+DROP POLICY IF EXISTS "Users can view conversations they participate in" ON conversations;
 CREATE POLICY "Users can view conversations they participate in" ON conversations
   FOR SELECT USING (
     id IN (
@@ -134,13 +141,16 @@ CREATE POLICY "Users can view conversations they participate in" ON conversation
     )
   );
 
+DROP POLICY IF EXISTS "Users can create conversations" ON conversations;
 CREATE POLICY "Users can create conversations" ON conversations
   FOR INSERT WITH CHECK (created_by = auth.uid());
 
+DROP POLICY IF EXISTS "Users can update conversations they created" ON conversations;
 CREATE POLICY "Users can update conversations they created" ON conversations
   FOR UPDATE USING (created_by = auth.uid());
 
 -- Create RLS policies for conversation_participants
+DROP POLICY IF EXISTS "Users can view participants in their conversations" ON conversation_participants;
 CREATE POLICY "Users can view participants in their conversations" ON conversation_participants
   FOR SELECT USING (
     conversation_id IN (
@@ -149,6 +159,7 @@ CREATE POLICY "Users can view participants in their conversations" ON conversati
     )
   );
 
+DROP POLICY IF EXISTS "Users can add participants to conversations they created" ON conversation_participants;
 CREATE POLICY "Users can add participants to conversations they created" ON conversation_participants
   FOR INSERT WITH CHECK (
     conversation_id IN (
@@ -157,10 +168,12 @@ CREATE POLICY "Users can add participants to conversations they created" ON conv
     OR user_id = auth.uid()
   );
 
+DROP POLICY IF EXISTS "Users can update their own participation" ON conversation_participants;
 CREATE POLICY "Users can update their own participation" ON conversation_participants
   FOR UPDATE USING (user_id = auth.uid());
 
 -- Create RLS policies for chat_messages
+DROP POLICY IF EXISTS "Users can view messages in their conversations" ON chat_messages;
 CREATE POLICY "Users can view messages in their conversations" ON chat_messages
   FOR SELECT USING (
     conversation_id IN (
@@ -169,6 +182,7 @@ CREATE POLICY "Users can view messages in their conversations" ON chat_messages
     )
   );
 
+DROP POLICY IF EXISTS "Users can send messages to their conversations" ON chat_messages;
 CREATE POLICY "Users can send messages to their conversations" ON chat_messages
   FOR INSERT WITH CHECK (
     sender_id = auth.uid() AND
@@ -178,6 +192,7 @@ CREATE POLICY "Users can send messages to their conversations" ON chat_messages
     )
   );
 
+DROP POLICY IF EXISTS "Users can update their own messages" ON chat_messages;
 CREATE POLICY "Users can update their own messages" ON chat_messages
   FOR UPDATE USING (sender_id = auth.uid());
 
@@ -198,21 +213,25 @@ END;
 $$ language 'plpgsql';
 
 -- Create triggers to automatically update updated_at
+DROP TRIGGER IF EXISTS update_user_profiles_updated_at ON user_profiles;
 CREATE TRIGGER update_user_profiles_updated_at 
     BEFORE UPDATE ON user_profiles 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_friendships_updated_at ON friendships;
 CREATE TRIGGER update_friendships_updated_at 
     BEFORE UPDATE ON friendships 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_conversations_updated_at ON conversations;
 CREATE TRIGGER update_conversations_updated_at 
     BEFORE UPDATE ON conversations 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_chat_messages_updated_at ON chat_messages;
 CREATE TRIGGER update_chat_messages_updated_at 
     BEFORE UPDATE ON chat_messages 
     FOR EACH ROW 
@@ -229,6 +248,7 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_conversation_last_message_trigger ON chat_messages;
 CREATE TRIGGER update_conversation_last_message_trigger
     AFTER INSERT ON chat_messages
     FOR EACH ROW
@@ -272,5 +292,120 @@ BEGIN
     END IF;
     
     RETURN conversation_id;
+END;
+$$ language 'plpgsql';
+
+-- Create function to automatically create user profile when a user signs up
+CREATE OR REPLACE FUNCTION create_user_profile_on_signup()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO user_profiles (user_id, display_name, email, is_searchable)
+    VALUES (
+        NEW.id,
+        COALESCE(SPLIT_PART(NEW.email, '@', 1), 'User'),
+        COALESCE(NEW.email, ''),
+        true
+    );
+    RETURN NEW;
+EXCEPTION
+    WHEN OTHERS THEN
+        -- Log error but don't fail the user creation
+        RAISE WARNING 'Failed to create user profile for user %: %', NEW.id, SQLERRM;
+        RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Create trigger to automatically create user profile when user signs up
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION create_user_profile_on_signup();
+
+-- Create function to search for users by email and create profiles if needed
+CREATE OR REPLACE FUNCTION search_users_by_email(search_email TEXT, current_user_id UUID)
+RETURNS TABLE (
+    user_id UUID,
+    display_name TEXT,
+    email TEXT,
+    avatar_url TEXT
+) AS $$
+BEGIN
+    -- First try to find users in user_profiles
+    RETURN QUERY
+    SELECT up.user_id, up.display_name, up.email, up.avatar_url
+    FROM user_profiles up
+    WHERE up.is_searchable = true 
+    AND up.user_id != current_user_id
+    AND up.email ILIKE '%' || search_email || '%';
+
+    -- If no results found in user_profiles, check auth.users and create profiles
+    IF NOT FOUND THEN
+        -- Insert missing profiles for users who exist in auth.users but not in user_profiles
+        INSERT INTO user_profiles (user_id, display_name, email, is_searchable)
+        SELECT au.id, COALESCE(SPLIT_PART(au.email, '@', 1), 'User'), au.email, true
+        FROM auth.users au
+        LEFT JOIN user_profiles up ON au.id = up.user_id
+        WHERE up.user_id IS NULL 
+        AND au.email ILIKE '%' || search_email || '%'
+        AND au.id != current_user_id
+        ON CONFLICT (user_id) DO NOTHING;
+
+        -- Now return the results including newly created profiles
+        RETURN QUERY
+        SELECT up.user_id, up.display_name, up.email, up.avatar_url
+        FROM user_profiles up
+        JOIN auth.users au ON up.user_id = au.id
+        WHERE up.is_searchable = true 
+        AND up.user_id != current_user_id
+        AND up.email ILIKE '%' || search_email || '%';
+    END IF;
+END;
+$$ language 'plpgsql';
+
+-- Create function to ensure a user profile exists for a given user_id
+CREATE OR REPLACE FUNCTION ensure_user_profile_exists(target_user_id UUID)
+RETURNS user_profiles AS $$
+DECLARE
+    profile_record user_profiles;
+    user_email TEXT;
+BEGIN
+    -- First try to get existing profile
+    SELECT * INTO profile_record FROM user_profiles WHERE user_id = target_user_id;
+    
+    -- If profile exists, return it
+    IF FOUND THEN
+        RETURN profile_record;
+    END IF;
+    
+    -- Profile doesn't exist, get user email from auth.users
+    SELECT email INTO user_email FROM auth.users WHERE id = target_user_id;
+    
+    -- Create new profile
+    INSERT INTO user_profiles (user_id, display_name, email, is_searchable)
+    VALUES (
+        target_user_id,
+        COALESCE(SPLIT_PART(user_email, '@', 1), 'User'),
+        COALESCE(user_email, ''),
+        true
+    )
+    RETURNING * INTO profile_record;
+    
+    RETURN profile_record;
+EXCEPTION
+    WHEN OTHERS THEN
+        -- If any error occurs, try to return existing profile or create a minimal one
+        SELECT * INTO profile_record FROM user_profiles WHERE user_id = target_user_id;
+        IF FOUND THEN
+            RETURN profile_record;
+        END IF;
+        
+        -- Create minimal profile as fallback
+        INSERT INTO user_profiles (user_id, display_name, email, is_searchable)
+        VALUES (target_user_id, 'User', '', true)
+        ON CONFLICT (user_id) DO UPDATE SET display_name = EXCLUDED.display_name
+        RETURNING * INTO profile_record;
+        
+        RETURN profile_record;
 END;
 $$ language 'plpgsql';

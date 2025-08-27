@@ -39,8 +39,26 @@ export default function AuthForm({ initialTab = 'signup', onBack, onForgotPasswo
       password: password,
     })
 
-    if (error) Alert.alert(error.message)
-    if (!session) Alert.alert('Please check your inbox for email verification!')
+    if (error) {
+      Alert.alert(error.message)
+    } else if (session?.user) {
+      // Create user profile after successful signup
+      const { error: profileError } = await supabase
+        .from('user_profiles')
+        .insert({
+          user_id: session.user.id,
+          display_name: email.split('@')[0], // Use part before @ as display name
+          email: email,
+          is_searchable: true
+        })
+
+      if (profileError) {
+        console.error('Error creating user profile:', profileError)
+        // Don't show alert to user as this is internal, but log it
+      }
+    } else {
+      Alert.alert('Please check your inbox for email verification!')
+    }
     setLoading(false)
   }
 
