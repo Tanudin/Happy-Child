@@ -1,0 +1,304 @@
+/**
+ * Utility to create missing profiles for legacy users
+ * 
+ * This handles users who were created before the profile system was implemented.
+ * Creates profiles with placeholder values that users can update later.
+ */
+
+import { supabase } from './supabase'
+import { calculateAge } from './userProfileService'
+
+interface MissingProfileUser {
+  id: string
+  email: string
+  created_at: string
+}
+
+/**
+ * Find all users who don't have profiles
+ */
+export async function findUsersWithoutProfiles(): Promise<{
+  data: MissingProfileUser[] | null
+  error: any
+}> {
+  try {
+    // Get all auth users
+    const { data: { users }, error: usersError } = await supabase.auth.admin.listUsers()
+    
+    if (usersError) {
+      console.error('Error fetching users:', usersError)
+      return { data: null, error: usersError }
+    }
+
+    if (!users || users.length === 0) {
+      return { data: [], error: null }
+    }
+
+    // Get all existing profiles
+    const { data: profiles, error: profilesError } = await supabase
+      .from('user_profiles')
+      .select('user_id')
+
+    if (profilesError) {
+      console.error('Error fetching profiles:', profilesError)
+      return { data: null, error: profilesError }
+    }
+
+    const profileUserIds = new Set(profiles?.map(p => p.user_id) || [])
+
+    // Filter users without profiles
+    const usersWithoutProfiles = users
+      .filter(user => !profileUserIds.has(user.id))
+      .map(user => ({
+        id: user.id,
+        email: user.email || 'unknown@email.com',
+        created_at: user.created_at,
+      }))
+
+    return { data: usersWithoutProfiles, error: null }
+  } catch (error) {
+    console.error('Unexpected error finding users without profiles:', error)
+    return { data: null, error }
+  }
+}
+
+/**
+ * Extract a display name from an email address
+ * Examples:
+ *   john.doe@gmail.com → "John Doe"
+ *   davidpenguino16@gmail.com → "Davidpenguino16"
+ */
+function extractNameFromEmail(email: string): { firstName: string; lastName: string; displayName: string } {
+  const username = email.split('@')[0]
+  
+  // Check if username has a dot (like john.doe)
+  if (username.includes('.')) {
+    const parts = username.split('.')
+    const firstName = parts[0].charAt(0).toUpperCase() + parts[0].slice(1)
+    const lastName = parts[1]?.charAt(0).toUpperCase() + parts[1]?.slice(1) || 'User'
+    return {
+      firstName,
+      lastName,
+      displayName: `${firstName} ${lastName}`,
+    }
+  }
+  
+  // Check if username has numbers or is a single word
+  const firstName = username.charAt(0).toUpperCase() + username.slice(1)
+  return {
+    firstName,
+    lastName: 'User',
+    displayName: firstName,
+  }
+}
+
+/**
+ * Create a profile for a single user with placeholder data
+ */
+export async function createPlaceholderProfile(
+  userId: string,
+  email: string,
+  createdAt?: string
+): Promise<{ success: boolean; error: any }> {
+  try {
+    const { firstName, lastName, displayName } = extractNameFromEmail(email)
+    const placeholderBirthDate = '2000-01-01'
+    const age = calculateAge(placeholderBirthDate)
+
+    const { error } = await supabase
+      .from('user_profiles')
+      .insert({
+        user_id: userId,
+        email: email,
+        display_name: displayName,
+        first_name: firstName,
+        last_name: lastName,
+        birth_date: placeholderBirthDate,
+        age: age,
+        phone_number: null,
+        is_searchable: true,
+        // If we have the original creation date, use it
+        ...(createdAt && { created_at: createdAt }),
+      })
+
+    if (error) {
+      console.error(`Failed to create profile for ${email}:`, error)
+      return { success: false, error }
+    }
+
+    console.log(`✅ Created profile for ${email}`)
+    return { success: true, error: null }
+  } catch (error) {
+    console.error(`Unexpected error creating profile for ${email}:`, error)
+    return { success: false, error }
+  }
+}
+
+/**
+ * Create profiles for all users who don't have one
+ * Returns summary of results
+ */
+export async function createMissingProfiles(): Promise<{
+  totalProcessed: number
+  successful: number
+  failed: number
+  errors: any[]
+}> {
+  const result = {
+    totalProcessed: 0,
+    successful: 0,
+    failed: 0,
+    errors: [] as any[],
+  }
+
+  try {
+    // Find users without profiles
+    const { data: users, error: findError } = await findUsersWithoutProfiles()
+
+    if (findError || !users) {
+      result.errors.push(findError)
+      return result
+    }
+
+    if (users.length === 0) {
+      console.log('✅ All users already have profiles!')
+      return result
+    }
+
+    console.log(`Found ${users.length} users without profiles. Creating...`)
+
+    // Create profiles for each user
+    for (const user of users) {
+      result.totalProcessed++
+      
+      const { success, error } = await createPlaceholderProfile(
+        user.id,
+        user.email,
+        user.created_at
+      )
+
+      if (success) {
+        result.successful++
+      } else {
+        result.failed++
+        result.errors.push({
+          userId: user.id,
+          email: user.email,
+          error,
+        })
+      }
+    }
+
+    console.log(`
+✅ Profile Creation Complete!
+   Total Processed: ${result.totalProcessed}
+   Successful: ${result.successful}
+   Failed: ${result.failed}
+    `)
+
+    return result
+  } catch (error) {
+    console.error('Unexpected error in createMissingProfiles:', error)
+    result.errors.push(error)
+    return result
+  }
+}
+
+/**
+ * Check if the current user has a profile, and create one if missing
+ * This is useful to call on app startup or login
+ */
+export async function ensureCurrentUserHasProfile(): Promise<{
+  hasProfile: boolean
+  created: boolean
+  error: any
+}> {
+  try {
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+
+    if (userError || !user) {
+      return { hasProfile: false, created: false, error: userError || new Error('No user') }
+    }
+
+    // Check if profile exists
+    const { data: profile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('user_id')
+      .eq('user_id', user.id)
+      .single()
+
+    if (profileError && profileError.code !== 'PGRST116') {
+      // PGRST116 means no rows returned, which is expected
+      console.error('Error checking profile:', profileError)
+      return { hasProfile: false, created: false, error: profileError }
+    }
+
+    if (profile) {
+      // Profile exists
+      return { hasProfile: true, created: false, error: null }
+    }
+
+    // Profile doesn't exist, create it
+    console.log('Creating placeholder profile for current user...')
+    const { success, error: createError } = await createPlaceholderProfile(
+      user.id,
+      user.email || 'unknown@email.com',
+      user.created_at
+    )
+
+    if (!success) {
+      return { hasProfile: false, created: false, error: createError }
+    }
+
+    console.log('✅ Placeholder profile created! User should update their information.')
+    return { hasProfile: true, created: true, error: null }
+  } catch (error) {
+    console.error('Unexpected error ensuring profile:', error)
+    return { hasProfile: false, created: false, error }
+  }
+}
+
+/**
+ * Admin function: Create profiles for all missing users
+ * Shows progress and returns detailed results
+ */
+export async function adminCreateMissingProfiles(): Promise<void> {
+  console.log('🔍 Searching for users without profiles...')
+  
+  const { data: users, error } = await findUsersWithoutProfiles()
+
+  if (error) {
+    console.error('❌ Error finding users:', error)
+    return
+  }
+
+  if (!users || users.length === 0) {
+    console.log('✅ All users have profiles! Nothing to do.')
+    return
+  }
+
+  console.log(`Found ${users.length} user(s) without profiles:`)
+  for (let index = 0; index < users.length; index++) {
+    const user = users[index]
+    console.log(`  ${index + 1}. ${user.email} (ID: ${user.id.substring(0, 8)}...)`)
+  }
+
+  console.log('\n🔨 Creating placeholder profiles...\n')
+  const results = await createMissingProfiles()
+
+  if (results.failed > 0) {
+    console.log('\n❌ Some profiles failed to create:')
+    for (const err of results.errors) {
+      console.log(`  - ${err.email}: ${err.error?.message || 'Unknown error'}`)
+    }
+  }
+
+  if (results.successful > 0) {
+    console.log(`\n✅ Successfully created ${results.successful} profile(s)!`)
+    console.log('\n📝 Note: Users should update their profile information:')
+    console.log('   - First Name: Currently placeholder')
+    console.log('   - Last Name: Currently placeholder')
+    console.log('   - Birth Date: Set to 2000-01-01')
+    console.log('   - Age: Calculated from placeholder birth date')
+  }
+}

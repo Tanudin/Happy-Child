@@ -1,6 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { supabase } from '@/lib/supabase';
+import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import { Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
@@ -11,6 +12,14 @@ interface Expense {
   date: string;
   payer: string;
   created_at: string;
+}
+
+interface Parent {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  first_name: string;
+  last_name: string;
 }
 
 interface EconomicsProps {
@@ -25,6 +34,9 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [parents, setParents] = useState<Parent[]>([]);
+  const [showPayerDropdown, setShowPayerDropdown] = useState(false);
+  const [timeFilter, setTimeFilter] = useState<'week' | 'month' | 'total'>('total');
   
   // Form state
   const [description, setDescription] = useState('');
@@ -34,10 +46,48 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
 
   useEffect(() => {
     loadExpenses();
+    fetchParents();
     // Set today's date as default
     const today = new Date().toISOString().split('T')[0];
     setDate(today);
   }, [childId]);
+
+  const fetchParents = async () => {
+    try {
+      // Fetch all user_children links for this child
+      const { data: userChildrenData, error: userChildrenError } = await supabase
+        .from('user_children')
+        .select('user_id')
+        .eq('child_id', childId);
+
+      if (userChildrenError) {
+        console.error('Error fetching user_children:', userChildrenError);
+        return;
+      }
+
+      if (!userChildrenData || userChildrenData.length === 0) {
+        setParents([]);
+        return;
+      }
+
+      // Get the user IDs
+      const userIds = userChildrenData.map(uc => uc.user_id);
+
+      // Fetch user profiles for those user IDs
+      const { data: profilesData, error: profilesError} = await supabase
+        .from('user_profiles')
+        .select('user_id, email, display_name, first_name, last_name')
+        .in('user_id', userIds);
+
+      if (profilesError) {
+        console.error('Error fetching profiles:', profilesError);
+      } else {
+        setParents(profilesData || []);
+      }
+    } catch (error) {
+      console.error('Error fetching parents:', error);
+    }
+  };
 
   const loadExpenses = async () => {
     try {
@@ -191,8 +241,34 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
     return date.toLocaleDateString();
   };
 
+  const getParentDisplayName = (parent: Parent) => {
+    if (parent.display_name) {
+      return parent.display_name;
+    }
+    return `${parent.first_name} ${parent.last_name}`.trim() || parent.email;
+  };
+
   const getTotalExpenses = () => {
-    return expenses.reduce((total, expense) => total + expense.amount, 0);
+    const now = new Date();
+    let filteredExpenses = expenses;
+
+    if (timeFilter === 'week') {
+      // Get expenses from the last 7 days
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      filteredExpenses = expenses.filter(expense => new Date(expense.date) >= weekAgo);
+    } else if (timeFilter === 'month') {
+      // Get expenses from the current month
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      filteredExpenses = expenses.filter(expense => new Date(expense.date) >= startOfMonth);
+    }
+
+    return filteredExpenses.reduce((total, expense) => total + expense.amount, 0);
+  };
+
+  const getFilterLabel = () => {
+    if (timeFilter === 'week') return 'This Week';
+    if (timeFilter === 'month') return 'This Month';
+    return 'Total';
   };
 
   const renderExpenseItem = ({ item }: { item: Expense }) => (
@@ -250,27 +326,100 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
 
   return (
     <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Text style={[styles.backButtonText, { color: Colors[colorScheme ?? 'light'].tint }]}>‹ Back</Text>
+          <Ionicons name="arrow-back" size={24} color={Colors[colorScheme ?? 'light'].text} />
         </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
+          Expenses - {childName}
+        </Text>
       </View>
       
       {/* Content */}
       <View style={styles.content}>
-        <Text style={[styles.title, { color: Colors[colorScheme ?? 'light'].text }]}>
-          Economics & Expenses
-        </Text>
-        
-        <Text style={[styles.subtitle, { color: Colors[colorScheme ?? 'light'].text }]}>
-          for {childName}
-        </Text>
 
         {/* Summary Card */}
         <View style={[styles.summaryCard, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground }]}>
           <Text style={[styles.summaryTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
-            Total Expenses
+            Total Expenses - {getFilterLabel()}
           </Text>
+
+          {/* Time Filter Buttons */}
+          <View style={styles.filterContainer}>
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                timeFilter === 'week' && styles.filterButtonActive,
+                { 
+                  backgroundColor: timeFilter === 'week' 
+                    ? Colors[colorScheme ?? 'light'].tint 
+                    : Colors[colorScheme ?? 'light'].inputBackground,
+                  borderColor: Colors[colorScheme ?? 'light'].border
+                }
+              ]}
+              onPress={() => setTimeFilter('week')}
+            >
+              <Text style={[
+                styles.filterButtonText,
+                { color: timeFilter === 'week' 
+                  ? Colors[colorScheme ?? 'light'].buttonText 
+                  : Colors[colorScheme ?? 'light'].text 
+                }
+              ]}>
+                Week
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                timeFilter === 'month' && styles.filterButtonActive,
+                { 
+                  backgroundColor: timeFilter === 'month' 
+                    ? Colors[colorScheme ?? 'light'].tint 
+                    : Colors[colorScheme ?? 'light'].inputBackground,
+                  borderColor: Colors[colorScheme ?? 'light'].border
+                }
+              ]}
+              onPress={() => setTimeFilter('month')}
+            >
+              <Text style={[
+                styles.filterButtonText,
+                { color: timeFilter === 'month' 
+                  ? Colors[colorScheme ?? 'light'].buttonText 
+                  : Colors[colorScheme ?? 'light'].text 
+                }
+              ]}>
+                Month
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                timeFilter === 'total' && styles.filterButtonActive,
+                { 
+                  backgroundColor: timeFilter === 'total' 
+                    ? Colors[colorScheme ?? 'light'].tint 
+                    : Colors[colorScheme ?? 'light'].inputBackground,
+                  borderColor: Colors[colorScheme ?? 'light'].border
+                }
+              ]}
+              onPress={() => setTimeFilter('total')}
+            >
+              <Text style={[
+                styles.filterButtonText,
+                { color: timeFilter === 'total' 
+                  ? Colors[colorScheme ?? 'light'].buttonText 
+                  : Colors[colorScheme ?? 'light'].text 
+                }
+              ]}>
+                Total
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           <Text style={[styles.summaryAmount, { color: Colors[colorScheme ?? 'light'].tint }]}>
             {formatCurrency(getTotalExpenses())}
           </Text>
@@ -380,17 +529,56 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
                 <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>
                   Who Paid?
                 </Text>
-                <TextInput
-                  style={[styles.textInput, { 
+                <TouchableOpacity
+                  style={[styles.dropdownButton, { 
                     backgroundColor: Colors[colorScheme ?? 'light'].inputBackground,
-                    color: Colors[colorScheme ?? 'light'].text,
                     borderColor: Colors[colorScheme ?? 'light'].border
                   }]}
-                  value={payer}
-                  onChangeText={setPayer}
-                  placeholder="Mom, Dad, Child, etc."
-                  placeholderTextColor={Colors[colorScheme ?? 'light'].textLight}
-                />
+                  onPress={() => setShowPayerDropdown(!showPayerDropdown)}
+                >
+                  <Text style={[styles.dropdownButtonText, { 
+                    color: payer ? Colors[colorScheme ?? 'light'].text : Colors[colorScheme ?? 'light'].textLight
+                  }]}>
+                    {payer || 'Select who paid'}
+                  </Text>
+                  <Text style={[styles.dropdownArrow, { color: Colors[colorScheme ?? 'light'].text }]}>
+                    {showPayerDropdown ? '▲' : '▼'}
+                  </Text>
+                </TouchableOpacity>
+                
+                {showPayerDropdown && (
+                  <View style={[styles.dropdownList, { 
+                    backgroundColor: Colors[colorScheme ?? 'light'].cardBackground,
+                    borderColor: Colors[colorScheme ?? 'light'].border
+                  }]}>
+                    {parents.length > 0 ? (
+                      parents.map((parent) => (
+                        <TouchableOpacity
+                          key={parent.user_id}
+                          style={[styles.dropdownItem, {
+                            backgroundColor: payer === getParentDisplayName(parent)
+                              ? `${Colors[colorScheme ?? 'light'].tint}20`
+                              : 'transparent'
+                          }]}
+                          onPress={() => {
+                            setPayer(getParentDisplayName(parent));
+                            setShowPayerDropdown(false);
+                          }}
+                        >
+                          <Text style={[styles.dropdownItemText, { color: Colors[colorScheme ?? 'light'].text }]}>
+                            {getParentDisplayName(parent)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))
+                    ) : (
+                      <View style={styles.dropdownItem}>
+                        <Text style={[styles.dropdownItemText, { color: Colors[colorScheme ?? 'light'].textSecondary }]}>
+                          No parents found
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
               </View>
 
               <View style={styles.modalActions}>
@@ -425,23 +613,26 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
-    paddingTop: 60,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    paddingTop: 60,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    gap: 15,
   },
   backButton: {
-    padding: 10,
+    padding: 5,
   },
-  backButtonText: {
-    fontSize: 16,
+  headerTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
+    flex: 1,
   },
   content: {
     flex: 1,
+    paddingHorizontal: 20,
   },
   title: {
     fontSize: 28,
@@ -490,6 +681,27 @@ const styles = StyleSheet.create({
   },
   summaryCount: {
     fontSize: 14,
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    gap: 10,
+    marginVertical: 16,
+    justifyContent: 'center',
+  },
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  filterButtonActive: {
+    // Active state styling is handled by backgroundColor in the component
+  },
+  filterButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   addButton: {
     padding: 16,
@@ -622,6 +834,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     padding: 12,
+    fontSize: 16,
+  },
+  dropdownButton: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dropdownButtonText: {
+    fontSize: 16,
+    flex: 1,
+  },
+  dropdownArrow: {
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  dropdownList: {
+    borderWidth: 1,
+    borderRadius: 8,
+    marginTop: 8,
+    maxHeight: 200,
+  },
+  dropdownItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  dropdownItemText: {
     fontSize: 16,
   },
   modalActions: {

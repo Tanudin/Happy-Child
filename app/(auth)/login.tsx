@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons'
 import React, { useState } from 'react'
-import { Alert, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import { Alert, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { Colors } from '../../constants/Colors'
 import { useColorScheme } from '../../hooks/useColorScheme'
 import { supabase } from '../../lib/supabase'
+import { calculateAge } from '../../lib/userProfileService'
 
 interface AuthFormProps {
   initialTab?: 'login' | 'signup'
@@ -17,6 +18,57 @@ export default function AuthForm({ initialTab = 'signup', onBack, onForgotPasswo
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'signup' | 'login'>(initialTab)
+  
+  // Additional signup fields
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [birthDate, setBirthDate] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+
+  const handleTabSwitch = (tab: 'signup' | 'login') => {
+    setActiveTab(tab)
+    // Clear all fields when switching tabs
+    setEmail('')
+    setPassword('')
+    setFirstName('')
+    setLastName('')
+    setBirthDate('')
+    setPhoneNumber('')
+    setConfirmPassword('')
+    setShowPassword(false)
+    setShowConfirmPassword(false)
+  }
+
+  const formatBirthDate = (text: string) => {
+    // Remove any non-numeric characters
+    const numbers = text.replace(/\D/g, '')
+    
+    // Format as YYYY-MM-DD
+    if (numbers.length <= 4) {
+      setBirthDate(numbers)
+    } else if (numbers.length <= 6) {
+      setBirthDate(`${numbers.slice(0, 4)}-${numbers.slice(4)}`)
+    } else if (numbers.length <= 8) {
+      setBirthDate(`${numbers.slice(0, 4)}-${numbers.slice(4, 6)}-${numbers.slice(6, 8)}`)
+    }
+  }
+
+  const formatPhoneNumber = (text: string) => {
+    // Remove any non-numeric characters
+    const numbers = text.replace(/\D/g, '')
+    
+    // Format as (XXX) XXX-XXXX
+    if (numbers.length <= 3) {
+      setPhoneNumber(numbers)
+    } else if (numbers.length <= 6) {
+      setPhoneNumber(`(${numbers.slice(0, 3)}) ${numbers.slice(3)}`)
+    } else if (numbers.length <= 10) {
+      setPhoneNumber(`(${numbers.slice(0, 3)}) ${numbers.slice(3, 6)}-${numbers.slice(6)}`)
+    }
+  }
 
   async function signInWithEmail() {
     setLoading(true)
@@ -31,62 +83,229 @@ export default function AuthForm({ initialTab = 'signup', onBack, onForgotPasswo
 
   async function signUpWithEmail() {
     setLoading(true)
+    
+    // Validation for signup
+    if (activeTab === 'signup') {
+      if (!firstName.trim() || !lastName.trim()) {
+        Alert.alert('Please enter your first and last name')
+        setLoading(false)
+        return
+      }
+      if (!email.trim() || !password.trim()) {
+        Alert.alert('Please enter your email and password')
+        setLoading(false)
+        return
+      }
+      if (password !== confirmPassword) {
+        Alert.alert('Passwords do not match')
+        setLoading(false)
+        return
+      }
+      if (password.length < 6) {
+        Alert.alert('Password must be at least 6 characters long')
+        setLoading(false)
+        return
+      }
+      if (!birthDate.trim()) {
+        Alert.alert('Please enter your birth date')
+        setLoading(false)
+        return
+      }
+      // Validate birthdate format (YYYY-MM-DD)
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/
+      if (!dateRegex.test(birthDate)) {
+        Alert.alert('Please enter birth date in YYYY-MM-DD format')
+        setLoading(false)
+        return
+      }
+      // Validate that it's a valid date
+      const dateObj = new Date(birthDate)
+      if (isNaN(dateObj.getTime()) || dateObj > new Date()) {
+        Alert.alert('Please enter a valid birth date')
+        setLoading(false)
+        return
+      }
+      
+      // Calculate age from birth date
+      const calculatedAge = calculateAge(birthDate)
+      if (calculatedAge < 1 || calculatedAge > 120) {
+        Alert.alert('Please enter a valid birth date (age must be between 1 and 120)')
+        setLoading(false)
+        return
+      }
+      
+      // Additional validation before sending to database
+      if (!firstName.trim() || !lastName.trim()) {
+        Alert.alert('Name fields cannot be empty')
+        setLoading(false)
+        return
+      }
+      
+      if (!email.trim()) {
+        Alert.alert('Email cannot be empty')
+        setLoading(false)
+        return
+      }
+    }
+    
+    console.log('Attempting signup with:', {
+      email: email,
+      emailLength: email.length,
+      emailTrimmed: email.trim(),
+      passwordLength: password.length,
+      firstName: firstName,
+      lastName: lastName
+    })
+    
     const {
-      data: { session },
+      data: { session, user },
       error,
     } = await supabase.auth.signUp({
-      email: email,
+      email: email.trim(),
       password: password,
+      options: {
+        data: {
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          birth_date: birthDate,
+          phone_number: phoneNumber.trim() || null,
+          age: calculateAge(birthDate),
+        }
+      }
     })
 
     if (error) {
-      Alert.alert(error.message)
-    } else if (session?.user) {
-      // Create user profile after successful signup
-      const { error: profileError } = await supabase
+      console.error('Signup auth error details:', {
+        message: error.message,
+        status: error.status,
+        name: error.name,
+        cause: error.cause
+      })
+      
+      let errorMessage = error.message
+      
+      // Provide helpful error messages
+      if (error.message.includes('Database error')) {
+        errorMessage = 'Database setup incomplete. Please run the schema setup in Supabase SQL Editor.\n\nSee FIX_DATABASE_ERROR.md for instructions.'
+      } else if (error.message.includes('User already registered')) {
+        errorMessage = 'This email is already registered. Try logging in instead.'
+      }
+      
+      Alert.alert('Signup Error', errorMessage)
+      setLoading(false)
+      return
+    } 
+    
+    // Check if we have a user (even without session, user should exist)
+    const userToUse = session?.user || user
+    
+    if (userToUse) {
+      console.log('User created, profile should be auto-created by trigger')
+      
+      // Wait a moment for the trigger to execute
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      // Verify profile was created
+      const { data: profileData, error: profileError } = await supabase
         .from('user_profiles')
-        .insert({
-          user_id: session.user.id,
-          display_name: email.split('@')[0], // Use part before @ as display name
-          email: email,
-          is_searchable: true
-        })
+        .select('*')
+        .eq('user_id', userToUse.id)
+        .single()
 
       if (profileError) {
-        console.error('Error creating user profile:', profileError)
-        // Don't show alert to user as this is internal, but log it
+        console.error('Profile verification error:', profileError)
+        Alert.alert(
+          'Profile Creation Error', 
+          `Profile was not created automatically. Please contact support.`
+        )
+      } else {
+        console.log('User profile created successfully:', profileData)
+        Alert.alert('Success!', 'Account created successfully!')
       }
     } else {
-      Alert.alert('Please check your inbox for email verification!')
+      console.error('No user returned from signup')
+      Alert.alert('Signup Issue', 'Account may have been created but profile setup failed. Please try logging in.')
     }
     setLoading(false)
   }
 
   return (
     <SafeAreaView style={[styles.authContainer, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
-      <View style={[styles.formContainer, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground }]}>
-        <View style={styles.tabContainer}>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'signup' && { borderBottomColor: Colors[colorScheme ?? 'light'].secondary }]}
-            onPress={() => setActiveTab('signup')}
-          >
-            <Text style={[styles.tabText, { color: Colors[colorScheme ?? 'light'].textLight }, activeTab === 'signup' && { color: Colors[colorScheme ?? 'light'].text }]}>
-              SIGN UP
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'login' && { borderBottomColor: Colors[colorScheme ?? 'light'].secondary }]}
-            onPress={() => setActiveTab('login')}
-          >
-            <Text style={[styles.tabText, { color: Colors[colorScheme ?? 'light'].textLight }, activeTab === 'login' && { color: Colors[colorScheme ?? 'light'].text }]}>
-              LOG IN
-            </Text>
-          </TouchableOpacity>
-        </View>
+      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+        <View style={[styles.formContainer, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground }]}>
+          <View style={styles.tabContainer}>
+            <TouchableOpacity 
+              style={[styles.tab, activeTab === 'signup' && { borderBottomColor: Colors[colorScheme ?? 'light'].secondary }]}
+              onPress={() => handleTabSwitch('signup')}
+            >
+              <Text style={[styles.tabText, { color: Colors[colorScheme ?? 'light'].textLight }, activeTab === 'signup' && { color: Colors[colorScheme ?? 'light'].text }]}>
+                SIGN UP
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.tab, activeTab === 'login' && { borderBottomColor: Colors[colorScheme ?? 'light'].secondary }]}
+              onPress={() => handleTabSwitch('login')}
+            >
+              <Text style={[styles.tabText, { color: Colors[colorScheme ?? 'light'].textLight }, activeTab === 'login' && { color: Colors[colorScheme ?? 'light'].text }]}>
+                LOG IN
+              </Text>
+            </TouchableOpacity>
+          </View>
         
         <Text style={[styles.formTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
           {activeTab === 'login' ? 'Log in' : 'Sign up'}
         </Text>
+
+        {activeTab === 'signup' && (
+          <>
+            <View style={styles.nameContainer}>
+              <View style={[styles.inputContainer, styles.halfWidth]}>
+                <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>First Name</Text>
+                <TextInput
+                  style={[styles.textInput, { backgroundColor: Colors[colorScheme ?? 'light'].inputBackground, color: Colors[colorScheme ?? 'light'].text }]}
+                  value={firstName}
+                  onChangeText={setFirstName}
+                  placeholder=""
+                  autoCapitalize="words"
+                />
+              </View>
+              <View style={[styles.inputContainer, styles.halfWidth]}>
+                <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>Last Name</Text>
+                <TextInput
+                  style={[styles.textInput, { backgroundColor: Colors[colorScheme ?? 'light'].inputBackground, color: Colors[colorScheme ?? 'light'].text }]}
+                  value={lastName}
+                  onChangeText={setLastName}
+                  placeholder=""
+                  autoCapitalize="words"
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>Birth Date</Text>
+              <TextInput
+                style={[styles.textInput, { backgroundColor: Colors[colorScheme ?? 'light'].inputBackground, color: Colors[colorScheme ?? 'light'].text }]}
+                value={birthDate}
+                onChangeText={formatBirthDate}
+                placeholder="YYYY-MM-DD"
+                keyboardType="numeric"
+                maxLength={10}
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>Phone Number (Optional)</Text>
+              <TextInput
+                style={[styles.textInput, { backgroundColor: Colors[colorScheme ?? 'light'].inputBackground, color: Colors[colorScheme ?? 'light'].text }]}
+                value={phoneNumber}
+                onChangeText={formatPhoneNumber}
+                placeholder="(555) 123-4567"
+                keyboardType="phone-pad"
+                maxLength={14}
+              />
+            </View>
+          </>
+        )}
 
         <View style={styles.inputContainer}>
           <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>Email</Text>
@@ -108,14 +327,39 @@ export default function AuthForm({ initialTab = 'signup', onBack, onForgotPasswo
               value={password}
               onChangeText={setPassword}
               placeholder=""
-              secureTextEntry={true}
+              secureTextEntry={!showPassword}
               autoCapitalize="none"
             />
-            <TouchableOpacity style={styles.eyeIcon}>
-              <Ionicons name="eye-off" size={20} color={Colors[colorScheme ?? 'light'].textLight} />
+            <TouchableOpacity 
+              style={styles.eyeIcon}
+              onPress={() => setShowPassword(!showPassword)}
+            >
+              <Ionicons name={showPassword ? "eye" : "eye-off"} size={20} color={Colors[colorScheme ?? 'light'].textLight} />
             </TouchableOpacity>
           </View>
         </View>
+
+        {activeTab === 'signup' && (
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>Confirm Password</Text>
+            <View style={styles.passwordContainer}>
+              <TextInput
+                style={[styles.textInput, styles.passwordInput, { backgroundColor: Colors[colorScheme ?? 'light'].inputBackground, color: Colors[colorScheme ?? 'light'].text }]}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder=""
+                secureTextEntry={!showConfirmPassword}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity 
+                style={styles.eyeIcon}
+                onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+              >
+                <Ionicons name={showConfirmPassword ? "eye" : "eye-off"} size={20} color={Colors[colorScheme ?? 'light'].textLight} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         <TouchableOpacity 
           style={[styles.submitButton, { backgroundColor: Colors[colorScheme ?? 'light'].secondary }]} 
@@ -133,6 +377,7 @@ export default function AuthForm({ initialTab = 'signup', onBack, onForgotPasswo
           </TouchableOpacity>
         )}
       </View>
+      </ScrollView>
 
       <TouchableOpacity 
         style={styles.backButton}
@@ -147,6 +392,9 @@ export default function AuthForm({ initialTab = 'signup', onBack, onForgotPasswo
 const styles = StyleSheet.create({
   authContainer: {
     flex: 1,
+  },
+  scrollContainer: {
+    flexGrow: 1,
   },
   tabContainer: {
     flexDirection: 'row',
@@ -182,6 +430,14 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 30,
+  },
+  nameContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 15,
+  },
+  halfWidth: {
+    flex: 1,
   },
   inputContainer: {
     marginBottom: 20,

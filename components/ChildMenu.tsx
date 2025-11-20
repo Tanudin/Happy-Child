@@ -21,10 +21,12 @@ interface ChildMenuProps {
   onBack: () => void;
   onCalendar: () => void;
   onEconomics: () => void;
+  onSettings: () => void;
+  onActivities: () => void;
   // Add more function props as needed for future features
 }
 
-export default function ChildMenu({ child, onBack, onCalendar, onEconomics }: ChildMenuProps) {
+export default function ChildMenu({ child, onBack, onCalendar, onEconomics, onSettings, onActivities }: ChildMenuProps) {
   const colorScheme = useColorScheme();
 
   // Template for menu options - easy to add more icons/functions
@@ -37,35 +39,10 @@ export default function ChildMenu({ child, onBack, onCalendar, onEconomics }: Ch
     },
     {
       id: 'economics',
-      title: 'Economics & Expenses',
+      title: 'Expenses',
       icon: '💰',
       onPress: onEconomics,
     },
-    // Template for adding more options:
-    // {
-    //   id: 'health',
-    //   title: 'Health',
-    //   icon: '🏥',
-    //   onPress: onHealth,
-    // },
-    // {
-    //   id: 'education',
-    //   title: 'Education',
-    //   icon: '📚',
-    //   onPress: onEducation,
-    // },
-    // {
-    //   id: 'activities',
-    //   title: 'Activities',
-    //   icon: '🎨',
-    //   onPress: onActivities,
-    // },
-    // {
-    //   id: 'photos',
-    //   title: 'Photos',
-    //   icon: '📸',
-    //   onPress: onPhotos,
-    // },
   ];
 
   const calculateAge = (birthDate: string): string => {
@@ -130,33 +107,27 @@ export default function ChildMenu({ child, onBack, onCalendar, onEconomics }: Ch
           </TouchableOpacity>
         ))}
         
-        {/* Template placeholder buttons for future features */}
+        {/* Active menu buttons for additional features */}
         <TouchableOpacity
           style={[styles.menuButton, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}
-          onPress={() => {/* Add your function here */}}
+          onPress={onActivities}
         >
-          <View style={[styles.menuButtonContent, { borderColor: Colors[colorScheme ?? 'light'].tint, opacity: 0.5 }]}>
-            <Text style={styles.menuIcon}>🏥</Text>
+          <View style={[styles.menuButtonContent, { borderColor: Colors[colorScheme ?? 'light'].tint }]}>
+            <Text style={styles.menuIcon}>🎨</Text>
             <Text style={[styles.menuTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
-              Health
-            </Text>
-            <Text style={[styles.comingSoon, { color: Colors[colorScheme ?? 'light'].text }]}>
-              Coming Soon
+              Recurring Activities
             </Text>
           </View>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.menuButton, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}
-          onPress={() => {/* Add your function here */}}
+          onPress={onSettings}
         >
-          <View style={[styles.menuButtonContent, { borderColor: Colors[colorScheme ?? 'light'].tint, opacity: 0.5 }]}>
-            <Text style={styles.menuIcon}>📚</Text>
+          <View style={[styles.menuButtonContent, { borderColor: Colors[colorScheme ?? 'light'].tint }]}>
+            <Text style={styles.menuIcon}>⚙️</Text>
             <Text style={[styles.menuTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
-              Education
-            </Text>
-            <Text style={[styles.comingSoon, { color: Colors[colorScheme ?? 'light'].text }]}>
-              Coming Soon
+              Settings
             </Text>
           </View>
         </TouchableOpacity>
@@ -212,33 +183,37 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'space-around',
+    alignItems: 'flex-start',
+    paddingHorizontal: 5,
   },
   menuButton: {
-    width: '48%',
-    marginBottom: 15,
+    width: '47%',
+    marginBottom: 20,
+    alignItems: 'center',
   },
   menuButtonContent: {
     padding: 20,
     borderRadius: 15,
     borderWidth: 2,
     alignItems: 'center',
-    minHeight: 120,
     justifyContent: 'center',
+    width: '100%',
+    height: 140,
+    gap: 10,
   },
   menuIcon: {
-    fontSize: 32,
-    marginBottom: 10,
+    fontSize: 40,
+    textAlign: 'center',
+    lineHeight: 44,
+    marginBottom: 5,
   },
   menuTitle: {
     fontSize: 14,
     fontWeight: 'bold',
     textAlign: 'center',
-  },
-  comingSoon: {
-    fontSize: 10,
-    opacity: 0.6,
-    marginTop: 5,
-    fontStyle: 'italic',
+    lineHeight: 16,
+    flexWrap: 'wrap',
+    maxWidth: '100%',
   },
 });

@@ -6,7 +6,9 @@ import ChildMenu from '../../components/ChildMenu';
 import IOSAlert from '../../components/IOSAlert';
 import { useIOSAlert } from '../../hooks/useIOSAlert';
 import { supabase } from '../../lib/supabase';
+import Activities from '../child/activities';
 import Calendar from '../child/calendar';
+import ChildSettings from '../child/child-settings';
 import Economics from '../child/economics';
 
 interface Child {
@@ -15,7 +17,7 @@ interface Child {
   date_of_birth: string;
 }
 
-type CurrentView = 'home' | 'childMenu' | 'calendar' | 'economics';
+type CurrentView = 'home' | 'childMenu' | 'calendar' | 'economics' | 'settings' | 'activities';
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
@@ -168,6 +170,14 @@ export default function HomeScreen() {
     setCurrentView('economics');
   };
 
+  const handleOpenSettings = () => {
+    setCurrentView('settings');
+  };
+
+  const handleOpenActivities = () => {
+    setCurrentView('activities');
+  };
+
   const handleCalendarConfirm = async (selectedDates: Date[]) => {
     if (!selectedChild) return;
     
@@ -186,6 +196,33 @@ export default function HomeScreen() {
     setCurrentView('childMenu');
   };
 
+  const handleSettingsBack = () => {
+    setCurrentView('childMenu');
+  };
+
+  const handleActivitiesBack = () => {
+    setCurrentView('childMenu');
+  };
+
+  const handleChildUpdated = async () => {
+    // Refresh the child's information after update
+    if (selectedChild) {
+      const { data, error } = await supabase
+        .from('children')
+        .select('*')
+        .eq('id', selectedChild.id)
+        .single();
+      
+      if (!error && data) {
+        setSelectedChild(data);
+        // Also update in the items list
+        setItems(prevItems => 
+          prevItems.map(item => item.id === data.id ? data : item)
+        );
+      }
+    }
+  };
+
   // Render different views based on current state
   if (currentView === 'childMenu' && selectedChild) {
     return (
@@ -194,6 +231,8 @@ export default function HomeScreen() {
         onBack={handleBackToHome}
         onCalendar={handleOpenCalendar}
         onEconomics={handleOpenEconomics}
+        onSettings={handleOpenSettings}
+        onActivities={handleOpenActivities}
       />
     );
   }
@@ -215,6 +254,27 @@ export default function HomeScreen() {
         childName={selectedChild.name}
         childId={selectedChild.id}
         onBack={handleEconomicsBack}
+      />
+    );
+  }
+
+  if (currentView === 'settings' && selectedChild) {
+    return (
+      <ChildSettings 
+        childName={selectedChild.name}
+        childId={selectedChild.id}
+        onBack={handleSettingsBack}
+        onChildUpdated={handleChildUpdated}
+      />
+    );
+  }
+
+  if (currentView === 'activities' && selectedChild) {
+    return (
+      <Activities
+        childName={selectedChild.name}
+        childId={selectedChild.id}
+        onBack={handleActivitiesBack}
       />
     );
   }

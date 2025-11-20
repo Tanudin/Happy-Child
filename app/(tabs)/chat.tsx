@@ -1,14 +1,13 @@
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { supabase } from '@/lib/supabase';
-import React, { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   FlatList,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
-  ScrollView,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -17,116 +16,89 @@ import {
 } from 'react-native';
 
 interface Friend {
-  id: string;
+  friendship_id: string;
+  user_id: string;
   display_name: string;
   email: string;
   avatar_url?: string;
-  friendship_id: string;
-  conversation_id?: string;
-  last_message_at?: string;
+  status: string;
+  created_at: string;
+  unread_count?: number;
+  last_message?: string;
+  last_message_time?: string;
 }
 
 interface FriendRequest {
-  id: string;
-  requester_id: string;
+  friendship_id: string;
+  user_id: string;
   display_name: string;
   email: string;
   avatar_url?: string;
   created_at: string;
 }
 
-interface ChatMessage {
-  id: string;
-  message: string;
-  sender_id: string;
-  sender_name: string;
-  timestamp: string;
-  created_at: string;
-  is_edited: boolean;
-  is_deleted: boolean;
-}
-
-interface UserProfile {
-  id: string;
+interface SearchResult {
+  user_id: string;
   display_name: string;
   email: string;
   avatar_url?: string;
 }
 
-export default function ChatScreen() {
+export default function FriendshipsScreen() {
   const colorScheme = useColorScheme();
+  const router = useRouter();
   const [friends, setFriends] = useState<Friend[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
-  const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sentRequests, setSentRequests] = useState<FriendRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [messageText, setMessageText] = useState('');
-  const [sending, setSending] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [searchModalVisible, setSearchModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
     loadCurrentUserAndFriends();
-  }, []);
-
-  useEffect(() => {
-    if (selectedFriend?.conversation_id) {
-      loadMessages();
-      
-      // Set up real-time subscription for new messages
-      const subscription = supabase
-        .channel(`chat_messages_${selectedFriend.conversation_id}`)
-        .on('postgres_changes', 
-          { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `conversation_id=eq.${selectedFriend.conversation_id}` },
-          (payload) => {
-            const newMessage = payload.new as ChatMessage;
-            // Get sender name for the new message
-            loadSenderName(newMessage).then(messageWithSender => {
-              setMessages(prev => [messageWithSender, ...prev]);
-            });
-            // Auto-scroll to bottom when new message arrives
-            setTimeout(() => {
-              flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-            }, 100);
+    
+    // Set up real-time subscription for friendship changes
+    const friendshipSubscription = supabase
+      .channel('friendships_changes')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'friendships' },
+        () => {
+          if (currentUser) {
+            loadFriends(currentUser.id);
+            loadFriendRequests(currentUser.id);
+            loadSentRequests(currentUser.id);
           }
-        )
-        .subscribe();
+        }
+      )
+      .subscribe();
 
-      return () => {
-        subscription.unsubscribe();
-      };
-    }
-  }, [selectedFriend]);
+    // Set up real-time subscription for message changes
+    const messageSubscription = supabase
+      .channel('messages_changes')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'messages' },
+        () => {
+          if (currentUser) {
+            loadFriends(currentUser.id);
+          }
+        }
+      )
+      .subscribe();
 
-  const loadSenderName = async (message: any): Promise<ChatMessage> => {
-    try {
-      const { data: profileData } = await supabase
-        .from('user_profiles')
-        .select('display_name')
-        .eq('user_id', message.sender_id)
-        .single();
-
-      return {
-        ...message,
-        sender_name: profileData?.display_name || 'Unknown'
-      };
-    } catch (error) {
-      return {
-        ...message,
-        sender_name: 'Unknown'
-      };
-    }
-  };
+    return () => {
+      friendshipSubscription.unsubscribe();
+      messageSubscription.unsubscribe();
+    };
+  }, []);
 
   const loadCurrentUserAndFriends = async () => {
     try {
       setLoading(true);
       
-      // Get current user
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData?.user?.id) {
         console.error('Error fetching user:', userError);
@@ -134,12 +106,12 @@ export default function ChatScreen() {
       }
       
       setCurrentUser(userData.user);
-
-      // Check if user profile exists, create one if it doesn't
-      await ensureUserProfileExists(userData.user);
       
-      await loadFriends(userData.user.id);
-      await loadFriendRequests(userData.user.id);
+      await Promise.all([
+        loadFriends(userData.user.id),
+        loadFriendRequests(userData.user.id),
+        loadSentRequests(userData.user.id)
+      ]);
     } catch (error) {
       console.error('Error loading user and friends:', error);
       Alert.alert('Error', 'Failed to load friends');
@@ -148,99 +120,96 @@ export default function ChatScreen() {
     }
   };
 
-  const ensureUserProfileExists = async (user: any) => {
-    try {
-      // Check if profile exists
-      const { data: existingProfile, error: checkError } = await supabase
-        .from('user_profiles')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-
-      // If profile doesn't exist, create one
-      if (checkError && checkError.code === 'PGRST116') { // No rows returned
-        const { error: createError } = await supabase
-          .from('user_profiles')
-          .insert({
-            user_id: user.id,
-            display_name: user.email?.split('@')[0] || 'User',
-            email: user.email || '',
-            is_searchable: true
-          });
-
-        if (createError) {
-          console.error('Error creating user profile:', createError);
-        }
-      }
-    } catch (error) {
-      console.error('Error ensuring user profile exists:', error);
-    }
+  const onRefresh = async () => {
+    if (!currentUser) return;
+    
+    setRefreshing(true);
+    await Promise.all([
+      loadFriends(currentUser.id),
+      loadFriendRequests(currentUser.id),
+      loadSentRequests(currentUser.id)
+    ]);
+    setRefreshing(false);
   };
 
   const loadFriends = async (userId: string) => {
     try {
-      // Get accepted friendships
-      const { data: friendshipsData, error: friendshipsError } = await supabase
+      // Get accepted friendships where current user is either user_id or friend_id
+      const { data, error } = await supabase
         .from('friendships')
-        .select('id, requester_id, addressee_id')
+        .select(`
+          id,
+          user_id,
+          friend_id,
+          status,
+          created_at
+        `)
         .eq('status', 'accepted')
-        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+        .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
 
-      if (friendshipsError) {
-        console.error('Error loading friendships:', friendshipsError);
+      if (error) {
+        console.error('Error loading friends:', error);
         return;
       }
 
-      // Process friendships to get friend data
+      // Get profile data for each friend and their message info
       const friendsData: Friend[] = [];
       
-      for (const friendship of friendshipsData || []) {
-        // Determine which user is the friend (not the current user)
-        const friendUserId = friendship.requester_id === userId 
-          ? friendship.addressee_id 
-          : friendship.requester_id;
+      for (const friendship of data || []) {
+        const friendUserId = friendship.user_id === userId 
+          ? friendship.friend_id 
+          : friendship.user_id;
 
-        try {
-          // Ensure friend has a profile (create one if needed)
-          const { data: profileData, error: profileError } = await supabase
-            .rpc('ensure_user_profile_exists', { target_user_id: friendUserId });
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('user_id, display_name, email, avatar_url')
+          .eq('user_id', friendUserId)
+          .single();
 
-          if (!profileError && profileData) {
-            // Get or create conversation between users
-            const { data: conversationData, error: conversationError } = await supabase
-              .rpc('get_or_create_direct_conversation', {
-                user1_id: userId,
-                user2_id: friendUserId
-              });
+        if (profileData) {
+          // Get unread message count
+          const { count: unreadCount } = await supabase
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('sender_id', friendUserId)
+            .eq('receiver_id', userId)
+            .eq('read', false);
 
-            let conversationId = null;
-            if (!conversationError && conversationData) {
-              conversationId = conversationData;
-            }
+          // Get last message
+          const { data: lastMessageData } = await supabase
+            .from('messages')
+            .select('content, created_at')
+            .or(
+              `and(sender_id.eq.${userId},receiver_id.eq.${friendUserId}),and(sender_id.eq.${friendUserId},receiver_id.eq.${userId})`
+            )
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
 
-            friendsData.push({
-              id: profileData.user_id,
-              display_name: profileData.display_name,
-              email: profileData.email,
-              avatar_url: profileData.avatar_url,
-              friendship_id: friendship.id,
-              conversation_id: conversationId,
-              last_message_at: undefined
-            });
-          } else {
-            console.error(`Error ensuring profile for friend ${friendUserId}:`, profileError);
-          }
-        } catch (error) {
-          console.error(`Error processing friend ${friendUserId}:`, error);
+          friendsData.push({
+            friendship_id: friendship.id,
+            user_id: profileData.user_id,
+            display_name: profileData.display_name,
+            email: profileData.email,
+            avatar_url: profileData.avatar_url,
+            status: friendship.status,
+            created_at: friendship.created_at,
+            unread_count: unreadCount || 0,
+            last_message: lastMessageData?.content,
+            last_message_time: lastMessageData?.created_at,
+          });
         }
       }
 
+      // Sort by last message time (most recent first)
+      friendsData.sort((a, b) => {
+        if (!a.last_message_time && !b.last_message_time) return 0;
+        if (!a.last_message_time) return 1;
+        if (!b.last_message_time) return -1;
+        return new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime();
+      });
+
       setFriends(friendsData);
-      
-      // Auto-select first friend if available
-      if (friendsData.length > 0) {
-        setSelectedFriend(friendsData[0]);
-      }
     } catch (error) {
       console.error('Error loading friends:', error);
     }
@@ -248,113 +217,90 @@ export default function ChatScreen() {
 
   const loadFriendRequests = async (userId: string) => {
     try {
-      // Get pending friend requests where current user is the addressee
-      const { data: requestsData, error: requestsError } = await supabase
+      // Get pending friendships where current user is the friend_id (recipient)
+      const { data, error } = await supabase
         .from('friendships')
-        .select('id, requester_id, created_at')
-        .eq('addressee_id', userId)
+        .select('id, user_id, created_at')
+        .eq('friend_id', userId)
         .eq('status', 'pending');
 
-      if (requestsError) {
-        console.error('Error loading friend requests:', requestsError);
+      if (error) {
+        console.error('Error loading friend requests:', error);
         return;
       }
 
       // Get profile data for each requester
-      const requestsWithProfiles: FriendRequest[] = [];
+      const requestsData: FriendRequest[] = [];
       
-      for (const request of requestsData || []) {
-        try {
-          // Ensure requester has a profile (create one if needed)
-          const { data: profileData, error: profileError } = await supabase
-            .rpc('ensure_user_profile_exists', { target_user_id: request.requester_id });
+      for (const request of data || []) {
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('user_id, display_name, email, avatar_url')
+          .eq('user_id', request.user_id)
+          .single();
 
-          if (!profileError && profileData) {
-            requestsWithProfiles.push({
-              id: request.id,
-              requester_id: request.requester_id,
-              display_name: profileData.display_name,
-              email: profileData.email,
-              avatar_url: profileData.avatar_url,
-              created_at: request.created_at
-            });
-          } else {
-            console.error(`Error ensuring profile for requester ${request.requester_id}:`, profileError);
-          }
-        } catch (error) {
-          console.error(`Error processing friend request ${request.id}:`, error);
+        if (profileData) {
+          requestsData.push({
+            friendship_id: request.id,
+            user_id: profileData.user_id,
+            display_name: profileData.display_name,
+            email: profileData.email,
+            avatar_url: profileData.avatar_url,
+            created_at: request.created_at
+          });
         }
       }
 
-      setFriendRequests(requestsWithProfiles);
+      setFriendRequests(requestsData);
     } catch (error) {
       console.error('Error loading friend requests:', error);
     }
   };
 
-  const loadMessages = async () => {
-    if (!selectedFriend?.conversation_id) return;
-
+  const loadSentRequests = async (userId: string) => {
     try {
+      // Get pending friendships where current user is the user_id (sender)
       const { data, error } = await supabase
-        .from('chat_messages')
-        .select('id, message, sender_id, timestamp, created_at, is_edited, is_deleted')
-        .eq('conversation_id', selectedFriend.conversation_id)
-        .eq('is_deleted', false)
-        .order('created_at', { ascending: false });
+        .from('friendships')
+        .select('id, friend_id, created_at')
+        .eq('user_id', userId)
+        .eq('status', 'pending');
 
       if (error) {
-        console.error('Error loading messages:', error);
-        Alert.alert('Error', 'Failed to load chat messages');
+        console.error('Error loading sent requests:', error);
         return;
       }
 
-      // Load sender names for all messages
-      const messagesWithSenders = await Promise.all(
-        (data || []).map(async (msg) => await loadSenderName(msg))
-      );
-
-      setMessages(messagesWithSenders);
-    } catch (error) {
-      console.error('Error loading messages:', error);
-      Alert.alert('Error', 'Failed to load chat messages');
-    }
-  };
-
-  const sendMessage = async () => {
-    if (!messageText.trim() || sending || !selectedFriend?.conversation_id || !currentUser) return;
-
-    try {
-      setSending(true);
-      const now = new Date().toISOString();
+      // Get profile data for each recipient
+      const sentData: FriendRequest[] = [];
       
-      const { error } = await supabase
-        .from('chat_messages')
-        .insert({
-          conversation_id: selectedFriend.conversation_id,
-          sender_id: currentUser.id,
-          message: messageText.trim(),
-          message_type: 'text',
-          timestamp: now,
-        });
+      for (const request of data || []) {
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('user_id, display_name, email, avatar_url')
+          .eq('user_id', request.friend_id)
+          .single();
 
-      if (error) {
-        console.error('Error sending message:', error);
-        Alert.alert('Error', 'Failed to send message');
-        return;
+        if (profileData) {
+          sentData.push({
+            friendship_id: request.id,
+            user_id: profileData.user_id,
+            display_name: profileData.display_name,
+            email: profileData.email,
+            avatar_url: profileData.avatar_url,
+            created_at: request.created_at
+          });
+        }
       }
 
-      setMessageText('');
+      setSentRequests(sentData);
     } catch (error) {
-      console.error('Error sending message:', error);
-      Alert.alert('Error', 'Failed to send message');
-    } finally {
-      setSending(false);
+      console.error('Error loading sent requests:', error);
     }
   };
 
   const searchUsers = async () => {
-    if (!searchQuery.trim()) {
+    if (!searchQuery.trim() || !currentUser) {
       setSearchResults([]);
       return;
     }
@@ -362,12 +308,13 @@ export default function ChatScreen() {
     try {
       setSearching(true);
       
-      // Use the server-side function to search for users and create profiles if needed
+      // Search for users by email
       const { data, error } = await supabase
-        .rpc('search_users_by_email', {
-          search_email: searchQuery.trim(),
-          current_user_id: currentUser?.id
-        });
+        .from('user_profiles')
+        .select('user_id, display_name, email, avatar_url')
+        .ilike('email', `%${searchQuery.trim()}%`)
+        .neq('user_id', currentUser.id) // Exclude current user
+        .limit(10);
 
       if (error) {
         console.error('Error searching users:', error);
@@ -375,17 +322,10 @@ export default function ChatScreen() {
         return;
       }
 
-      const results: UserProfile[] = (data || []).map((user: any) => ({
-        id: user.user_id,
-        display_name: user.display_name,
-        email: user.email,
-        avatar_url: user.avatar_url
-      }));
+      setSearchResults(data || []);
 
-      setSearchResults(results);
-
-      if (results.length === 0) {
-        console.log('No users found with that email');
+      if (!data || data.length === 0) {
+        Alert.alert('No Results', 'No users found with that email');
       }
     } catch (error) {
       console.error('Error searching users:', error);
@@ -399,21 +339,30 @@ export default function ChatScreen() {
     if (!currentUser) return;
 
     try {
+      // Check if friendship already exists
+      const { data: existing } = await supabase
+        .from('friendships')
+        .select('id, status')
+        .or(`and(user_id.eq.${currentUser.id},friend_id.eq.${targetUserId}),and(user_id.eq.${targetUserId},friend_id.eq.${currentUser.id})`)
+        .single();
+
+      if (existing) {
+        Alert.alert('Info', `You already have a ${existing.status} friendship with this user`);
+        return;
+      }
+
+      // Create new friendship
       const { error } = await supabase
         .from('friendships')
         .insert({
-          requester_id: currentUser.id,
-          addressee_id: targetUserId,
+          user_id: currentUser.id,
+          friend_id: targetUserId,
           status: 'pending'
         });
 
       if (error) {
-        if (error.code === '23505') { // Unique constraint violation
-          Alert.alert('Info', 'Friend request already exists');
-        } else {
-          console.error('Error sending friend request:', error);
-          Alert.alert('Error', 'Failed to send friend request');
-        }
+        console.error('Error sending friend request:', error);
+        Alert.alert('Error', 'Failed to send friend request');
         return;
       }
 
@@ -421,19 +370,21 @@ export default function ChatScreen() {
       setSearchModalVisible(false);
       setSearchQuery('');
       setSearchResults([]);
+      
+      // Reload sent requests
+      await loadSentRequests(currentUser.id);
     } catch (error) {
       console.error('Error sending friend request:', error);
       Alert.alert('Error', 'Failed to send friend request');
     }
   };
 
-  const acceptFriendRequest = async (requestId: string, requesterId: string) => {
+  const acceptFriendRequest = async (friendshipId: string) => {
     try {
-      // Update friendship status to accepted
       const { error } = await supabase
         .from('friendships')
         .update({ status: 'accepted' })
-        .eq('id', requestId);
+        .eq('id', friendshipId);
 
       if (error) {
         console.error('Error accepting friend request:', error);
@@ -443,10 +394,11 @@ export default function ChatScreen() {
 
       Alert.alert('Success', 'Friend request accepted!');
       
-      // Reload friends and friend requests
       if (currentUser) {
-        await loadFriends(currentUser.id);
-        await loadFriendRequests(currentUser.id);
+        await Promise.all([
+          loadFriends(currentUser.id),
+          loadFriendRequests(currentUser.id)
+        ]);
       }
     } catch (error) {
       console.error('Error accepting friend request:', error);
@@ -454,13 +406,12 @@ export default function ChatScreen() {
     }
   };
 
-  const denyFriendRequest = async (requestId: string) => {
+  const denyFriendRequest = async (friendshipId: string) => {
     try {
-      // Delete the friendship request
       const { error } = await supabase
         .from('friendships')
         .delete()
-        .eq('id', requestId);
+        .eq('id', friendshipId);
 
       if (error) {
         console.error('Error denying friend request:', error);
@@ -468,9 +419,6 @@ export default function ChatScreen() {
         return;
       }
 
-      Alert.alert('Success', 'Friend request denied');
-      
-      // Reload friend requests
       if (currentUser) {
         await loadFriendRequests(currentUser.id);
       }
@@ -480,59 +428,160 @@ export default function ChatScreen() {
     }
   };
 
-  const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    
-    if (messageDate.getTime() === today.getTime()) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + 
-             ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const cancelSentRequest = async (friendshipId: string) => {
+    try {
+      const { error } = await supabase
+        .from('friendships')
+        .delete()
+        .eq('id', friendshipId);
+
+      if (error) {
+        console.error('Error canceling friend request:', error);
+        Alert.alert('Error', 'Failed to cancel friend request');
+        return;
+      }
+
+      if (currentUser) {
+        await loadSentRequests(currentUser.id);
+      }
+    } catch (error) {
+      console.error('Error canceling friend request:', error);
+      Alert.alert('Error', 'Failed to cancel friend request');
     }
   };
 
-  const renderMessage = ({ item }: { item: ChatMessage }) => {
-    const isCurrentUser = item.sender_id === currentUser?.id;
-    
-    return (
-      <View style={[
-        styles.messageContainer,
-        isCurrentUser ? styles.sentMessage : styles.receivedMessage
-      ]}>
-        <View style={[
-          styles.messageBubble,
-          isCurrentUser ? styles.sentBubble : styles.receivedBubble,
-          { backgroundColor: isCurrentUser ? Colors[colorScheme ?? 'light'].tint : Colors[colorScheme ?? 'light'].background }
-        ]}>
-          {!isCurrentUser && (
-            <Text style={[styles.senderName, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
-              {item.sender_name}
-            </Text>
-          )}
-          <Text style={[
-            styles.messageText,
-            { color: isCurrentUser ? 'white' : Colors[colorScheme ?? 'light'].text }
-          ]}>
-            {item.message}
-          </Text>
-          <Text style={[
-            styles.timestamp,
-            { color: isCurrentUser ? 'rgba(255,255,255,0.7)' : Colors[colorScheme ?? 'light'].tabIconDefault }
-          ]}>
-            {formatTime(item.timestamp)}
-          </Text>
-        </View>
-      </View>
+  const removeFriend = async (friendshipId: string, friendName: string) => {
+    Alert.alert(
+      'Remove Friend',
+      `Are you sure you want to remove ${friendName}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('friendships')
+                .delete()
+                .eq('id', friendshipId);
+
+              if (error) {
+                console.error('Error removing friend:', error);
+                Alert.alert('Error', 'Failed to remove friend');
+                return;
+              }
+
+              if (currentUser) {
+                await loadFriends(currentUser.id);
+              }
+            } catch (error) {
+              console.error('Error removing friend:', error);
+              Alert.alert('Error', 'Failed to remove friend');
+            }
+          }
+        }
+      ]
     );
   };
 
-  const renderSearchResult = ({ item }: { item: UserProfile }) => (
+  const renderFriend = ({ item }: { item: Friend }) => (
+    <TouchableOpacity 
+      style={[styles.friendItem, { borderBottomColor: Colors[colorScheme ?? 'light'].tabIconDefault }]}
+      onPress={() => router.push({
+        pathname: '/chat/[friendId]',
+        params: { friendId: item.user_id, friendName: item.display_name }
+      })}
+    >
+      <View style={styles.friendInfo}>
+        <View style={styles.friendHeader}>
+          <Text style={[styles.friendName, { color: Colors[colorScheme ?? 'light'].text }]}>
+            {item.display_name}
+          </Text>
+          {item.unread_count !== undefined && item.unread_count > 0 && (
+            <View style={[styles.unreadBadge, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}>
+              <Text style={styles.unreadBadgeText}>{item.unread_count}</Text>
+            </View>
+          )}
+        </View>
+        {item.last_message ? (
+          <Text 
+            style={[styles.lastMessage, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}
+            numberOfLines={1}
+          >
+            {item.last_message}
+          </Text>
+        ) : (
+          <Text style={[styles.noMessages, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+            No messages yet - Tap to chat!
+          </Text>
+        )}
+        {item.last_message_time && (
+          <Text style={[styles.messageTime, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+            {new Date(item.last_message_time).toLocaleString()}
+          </Text>
+        )}
+      </View>
+      <Text style={[styles.chevron, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>›</Text>
+    </TouchableOpacity>
+  );
+
+  const renderFriendRequest = ({ item }: { item: FriendRequest }) => (
+    <View style={[styles.requestItem, { borderBottomColor: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+      <View style={styles.requestInfo}>
+        <Text style={[styles.requestName, { color: Colors[colorScheme ?? 'light'].text }]}>
+          {item.display_name}
+        </Text>
+        <Text style={[styles.requestEmail, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+          {item.email}
+        </Text>
+        <Text style={[styles.requestTime, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+          {new Date(item.created_at).toLocaleDateString()}
+        </Text>
+      </View>
+      <View style={styles.requestActions}>
+        <TouchableOpacity 
+          style={[styles.acceptButton, { backgroundColor: '#22c55e' }]}
+          onPress={() => acceptFriendRequest(item.friendship_id)}
+        >
+          <Text style={styles.actionButtonText}>Accept</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.denyButton, { backgroundColor: '#ef4444' }]}
+          onPress={() => denyFriendRequest(item.friendship_id)}
+        >
+          <Text style={styles.actionButtonText}>Deny</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const renderSentRequest = ({ item }: { item: FriendRequest }) => (
+    <View style={[styles.requestItem, { borderBottomColor: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+      <View style={styles.requestInfo}>
+        <Text style={[styles.requestName, { color: Colors[colorScheme ?? 'light'].text }]}>
+          {item.display_name}
+        </Text>
+        <Text style={[styles.requestEmail, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+          {item.email}
+        </Text>
+        <Text style={[styles.requestTime, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+          Sent {new Date(item.created_at).toLocaleDateString()}
+        </Text>
+      </View>
+      <TouchableOpacity 
+        style={[styles.cancelButton, { backgroundColor: '#6b7280' }]}
+        onPress={() => cancelSentRequest(item.friendship_id)}
+      >
+        <Text style={styles.actionButtonText}>Cancel</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderSearchResult = ({ item }: { item: SearchResult }) => (
     <TouchableOpacity 
       style={[styles.searchResultItem, { borderBottomColor: Colors[colorScheme ?? 'light'].tabIconDefault }]}
-      onPress={() => sendFriendRequest(item.id)}
+      onPress={() => sendFriendRequest(item.user_id)}
     >
       <View style={styles.searchResultInfo}>
         <Text style={[styles.searchResultName, { color: Colors[colorScheme ?? 'light'].text }]}>
@@ -543,49 +592,19 @@ export default function ChatScreen() {
         </Text>
       </View>
       <TouchableOpacity 
-        style={[styles.addFriendButton, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}
-        onPress={() => sendFriendRequest(item.id)}
+        style={[styles.addButton, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}
+        onPress={() => sendFriendRequest(item.user_id)}
       >
-        <Text style={styles.addFriendButtonText}>Add</Text>
+        <Text style={styles.addButtonText}>Add</Text>
       </TouchableOpacity>
     </TouchableOpacity>
-  );
-
-  const renderFriendRequest = ({ item }: { item: FriendRequest }) => (
-    <View style={[styles.friendRequestItem, { borderBottomColor: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
-      <View style={styles.friendRequestInfo}>
-        <Text style={[styles.friendRequestName, { color: Colors[colorScheme ?? 'light'].text }]}>
-          {item.display_name}
-        </Text>
-        <Text style={[styles.friendRequestEmail, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
-          {item.email}
-        </Text>
-        <Text style={[styles.friendRequestTime, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
-          {new Date(item.created_at).toLocaleDateString()}
-        </Text>
-      </View>
-      <View style={styles.friendRequestActions}>
-        <TouchableOpacity 
-          style={[styles.acceptButton, { backgroundColor: '#22c55e' }]}
-          onPress={() => acceptFriendRequest(item.id, item.requester_id)}
-        >
-          <Text style={styles.actionButtonText}>Accept</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.denyButton, { backgroundColor: '#ef4444' }]}
-          onPress={() => denyFriendRequest(item.id)}
-        >
-          <Text style={styles.actionButtonText}>Deny</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
   );
 
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
         <View style={[styles.header, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}>
-          <Text style={styles.headerTitle}>Friends Chat</Text>
+          <Text style={styles.headerTitle}>Friends</Text>
         </View>
         <View style={styles.loadingContainer}>
           <Text style={{ color: Colors[colorScheme ?? 'light'].text }}>Loading...</Text>
@@ -595,121 +614,81 @@ export default function ChatScreen() {
   }
 
   return (
-    <KeyboardAvoidingView 
-      style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}>
-        <Text style={styles.headerTitle}>Friends Chat</Text>
+        <Text style={styles.headerTitle}>Messages</Text>
         <TouchableOpacity 
-          style={styles.addFriendHeaderButton}
+          style={styles.addFriendButton}
           onPress={() => setSearchModalVisible(true)}
         >
-          <Text style={styles.addFriendHeaderButtonText}>+</Text>
+          <Text style={styles.addFriendButtonText}>+</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Friends Selector */}
-      <View style={[styles.friendsSelector, { borderBottomColor: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
-        {friends.length > 0 ? (
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.friendsScrollContent}
-          >
-            {friends.map((friend) => (
-              <TouchableOpacity
-                key={friend.id}
-                style={[
-                  styles.friendTab,
-                  selectedFriend?.id === friend.id && { backgroundColor: Colors[colorScheme ?? 'light'].tint },
-                  { borderColor: Colors[colorScheme ?? 'light'].tint }
-                ]}
-                onPress={() => setSelectedFriend(friend)}
-              >
-                <Text style={[
-                  styles.friendTabText,
-                  { color: selectedFriend?.id === friend.id ? 'white' : Colors[colorScheme ?? 'light'].tint }
-                ]}>
-                  {friend.display_name}
+      {/* Content */}
+      <FlatList
+        data={[]}
+        renderItem={() => null}
+        ListHeaderComponent={
+          <>
+            {/* Friend Requests Section */}
+            {friendRequests.length > 0 && (
+              <View style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
+                  Friend Requests ({friendRequests.length})
                 </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        ) : (
-          <View style={styles.noFriendsContainer}>
-            <Text style={[styles.noFriendsText, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
-              No friends yet. Tap + to add friends!
-            </Text>
-          </View>
-        )}
-      </View>
+                {friendRequests.map(request => (
+                  <View key={request.friendship_id}>
+                    {renderFriendRequest({ item: request })}
+                  </View>
+                ))}
+              </View>
+            )}
 
-      {/* Friend Requests */}
-      {friendRequests.length > 0 && (
-        <View style={[styles.friendRequestsSection, { borderBottomColor: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
-          <Text style={[styles.friendRequestsTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
-            Friend Requests ({friendRequests.length})
-          </Text>
-          <FlatList
-            data={friendRequests}
-            renderItem={renderFriendRequest}
-            keyExtractor={(item) => item.id}
-            style={styles.friendRequestsList}
-            scrollEnabled={false}
-          />
-        </View>
-      )}
+            {/* Sent Requests Section */}
+            {sentRequests.length > 0 && (
+              <View style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
+                  Sent Requests ({sentRequests.length})
+                </Text>
+                {sentRequests.map(request => (
+                  <View key={request.friendship_id}>
+                    {renderSentRequest({ item: request })}
+                  </View>
+                ))}
+              </View>
+            )}
 
-      {/* Messages */}
-      {selectedFriend && (
-        <>
-          <FlatList
-            ref={flatListRef}
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item) => item.id}
-            style={styles.messagesList}
-            contentContainerStyle={styles.messagesContent}
-            inverted
-            showsVerticalScrollIndicator={false}
-          />
-
-          {/* Input */}
-          <View style={[styles.inputContainer, { borderTopColor: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
-            <TextInput
-              style={[
-                styles.textInput,
-                { 
-                  backgroundColor: Colors[colorScheme ?? 'light'].background,
-                  color: Colors[colorScheme ?? 'light'].text,
-                  borderColor: Colors[colorScheme ?? 'light'].tabIconDefault
-                }
-              ]}
-              value={messageText}
-              onChangeText={setMessageText}
-              placeholder={`Message ${selectedFriend.display_name}...`}
-              placeholderTextColor={Colors[colorScheme ?? 'light'].tabIconDefault}
-              multiline
-              maxLength={500}
-            />
-            <TouchableOpacity
-              style={[
-                styles.sendButton,
-                { backgroundColor: Colors[colorScheme ?? 'light'].tint },
-                (!messageText.trim() || sending) && styles.sendButtonDisabled
-              ]}
-              onPress={sendMessage}
-              disabled={!messageText.trim() || sending}
-            >
-              <Text style={styles.sendButtonText}>
-                {sending ? '...' : '→'}
+            {/* Friends Section */}
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
+                Conversations ({friends.length})
               </Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
+              {friends.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={[styles.emptyStateText, { color: Colors[colorScheme ?? 'light'].tabIconDefault }]}>
+                    No friends yet. Tap + to add friends and start chatting!
+                  </Text>
+                </View>
+              ) : (
+                friends.map(friend => (
+                  <View key={friend.friendship_id}>
+                    {renderFriend({ item: friend })}
+                  </View>
+                ))
+              )}
+            </View>
+          </>
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Colors[colorScheme ?? 'light'].tint}
+          />
+        }
+      />
 
       {/* Search Modal */}
       <Modal
@@ -764,13 +743,13 @@ export default function ChatScreen() {
           <FlatList
             data={searchResults}
             renderItem={renderSearchResult}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item) => item.user_id}
             style={styles.searchResultsList}
             contentContainerStyle={styles.searchResultsContent}
           />
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -786,13 +765,13 @@ const styles = StyleSheet.create({
     paddingTop: 50,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
     color: 'white',
     flex: 1,
     textAlign: 'center',
   },
-  addFriendHeaderButton: {
+  addFriendButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -800,119 +779,144 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  addFriendHeaderButtonText: {
+  addFriendButtonText: {
     color: 'white',
     fontSize: 24,
     fontWeight: 'bold',
-  },
-  friendsSelector: {
-    borderBottomWidth: 1,
-    paddingVertical: 8,
-  },
-  friendsScrollContent: {
-    paddingHorizontal: 16,
-  },
-  friendTab: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    marginRight: 8,
-  },
-  friendTabText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  noFriendsContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  noFriendsText: {
-    fontSize: 16,
-    textAlign: 'center',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  messagesList: {
-    flex: 1,
+  section: {
+    paddingTop: 16,
   },
-  messagesContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  messageContainer: {
-    marginVertical: 4,
-  },
-  sentMessage: {
-    alignItems: 'flex-end',
-  },
-  receivedMessage: {
-    alignItems: 'flex-start',
-  },
-  messageBubble: {
-    maxWidth: '80%',
-    padding: 12,
-    borderRadius: 18,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  sentBubble: {
-    borderBottomRightRadius: 4,
-  },
-  receivedBubble: {
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.1)',
-  },
-  senderName: {
-    fontSize: 12,
+  sectionTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 20,
-  },
-  timestamp: {
-    fontSize: 11,
-    marginTop: 4,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    padding: 16,
-    borderTopWidth: 1,
-    alignItems: 'flex-end',
-  },
-  textInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginRight: 8,
-    maxHeight: 100,
-    fontSize: 16,
+    paddingBottom: 12,
   },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  friendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+  },
+  friendInfo: {
+    flex: 1,
+  },
+  friendHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  friendName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginRight: 8,
+  },
+  unreadBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 6,
   },
-  sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  sendButtonText: {
+  unreadBadgeText: {
     color: 'white',
-    fontSize: 20,
+    fontSize: 12,
     fontWeight: 'bold',
+  },
+  lastMessage: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  noMessages: {
+    fontSize: 14,
+    marginBottom: 4,
+    fontStyle: 'italic',
+  },
+  messageTime: {
+    fontSize: 12,
+  },
+  chevron: {
+    fontSize: 24,
+    marginLeft: 8,
+  },
+  friendEmail: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  friendSince: {
+    fontSize: 12,
+  },
+  removeButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  removeButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  requestItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+  },
+  requestInfo: {
+    flex: 1,
+  },
+  requestName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  requestEmail: {
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  requestTime: {
+    fontSize: 12,
+  },
+  requestActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  acceptButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  denyButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  cancelButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  actionButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  emptyState: {
+    padding: 32,
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    fontSize: 16,
+    textAlign: 'center',
   },
   modalContainer: {
     flex: 1,
@@ -981,67 +985,13 @@ const styles = StyleSheet.create({
   searchResultEmail: {
     fontSize: 14,
   },
-  addFriendButton: {
+  addButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 16,
   },
-  addFriendButtonText: {
+  addButtonText: {
     color: 'white',
     fontWeight: 'bold',
-  },
-  friendRequestItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    paddingHorizontal: 16,
-  },
-  friendRequestInfo: {
-    flex: 1,
-  },
-  friendRequestName: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  friendRequestEmail: {
-    fontSize: 14,
-    marginBottom: 2,
-  },
-  friendRequestTime: {
-    fontSize: 12,
-  },
-  friendRequestActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  acceptButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  denyButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  actionButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  friendRequestsSection: {
-    borderBottomWidth: 1,
-    paddingVertical: 8,
-  },
-  friendRequestsTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  friendRequestsList: {
-    maxHeight: 200,
   },
 });

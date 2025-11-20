@@ -25,9 +25,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="chat"
         options={{
-          title: 'Chat',
+          title: 'Friends',
           tabBarIcon: ({ color, focused }) => (
-            <TabBarIcon name={focused ? 'chatbubble' : 'chatbubble-outline'} color={color} />
+            <TabBarIcon name={focused ? 'people' : 'people-outline'} color={color} />
           ),
         }}
       />
@@ -40,15 +40,15 @@ export default function TabLayout() {
           ),
         }}
       />
-      <Tabs.Screen
+      {/*<Tabs.Screen
         name="testing"
         options={{
-          title: 'Testing',
+          title: 'Settings',
           tabBarIcon: ({ color, focused }) => (
-            <TabBarIcon name={focused ? 'flask' : 'flask-outline'} color={color} />
+            <TabBarIcon name={focused ? 'settings' : 'settings-outline'} color={color} />
           ),
         }}
-      />
+      />*/}
     </Tabs>
   )
 }

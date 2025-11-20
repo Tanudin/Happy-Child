@@ -1,14 +1,25 @@
 import React from 'react'
-import { StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { Colors } from '../../constants/Colors'
 import { useColorScheme } from '../../hooks/useColorScheme'
 
-export default function SettingsScreen() {
+interface SettingsScreenProps {
+  onBack?: () => void
+}
+
+export default function SettingsScreen({ onBack }: SettingsScreenProps) {
   const colorScheme = useColorScheme()
   const colors = Colors[colorScheme ?? 'light']
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {onBack && (
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <Text style={[styles.backButtonText, { color: colors.tint }]}>‹ Back</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       <View style={styles.content}>
         <Text style={[styles.title, { color: colors.text }]}>
           Settings
@@ -27,6 +38,18 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  header: {
+    paddingTop: 60,
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+  },
+  backButton: {
+    padding: 10,
+  },
+  backButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   content: {
     flex: 1,

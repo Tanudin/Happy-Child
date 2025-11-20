@@ -93,12 +93,6 @@ export default function RootLayout() {
             headerShown: false,
           }} 
         />
-        <Stack.Screen 
-          name="settings" 
-          options={{ 
-            headerShown: false,
-          }} 
-        />
       </Stack>
     </SafeAreaProvider>
   )
