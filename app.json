@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "DivorceApp",
-    "slug": "DivorceApp",
+    "name": "Doplan",
+    "slug": "Doplan",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "divorceapp",
+    "scheme": "doplan",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
