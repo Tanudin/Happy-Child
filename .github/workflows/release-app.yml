@@ -1,4 +1,4 @@
-me: Build and upload app
+name: Build and upload app
 on:
   push:
     branches:
