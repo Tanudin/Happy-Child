@@ -1,5 +1,28 @@
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import { isBrowser } from './platformUtils'
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { isBrowser } from "./platformUtils";
+
+const SUPABASE_AUTH_KEY = "supabase.auth.token";
+
+/**
+ * Clear all Supabase auth data from storage
+ * Useful when dealing with corrupted or invalid tokens
+ */
+export const clearSupabaseStorage = async (): Promise<void> => {
+  try {
+    if (isBrowser()) {
+      const keys = await AsyncStorage.getAllKeys();
+      const supabaseKeys = keys.filter((key) =>
+        key.startsWith("supabase.auth"),
+      );
+      if (supabaseKeys.length > 0) {
+        await AsyncStorage.multiRemove(supabaseKeys);
+        console.log("Cleared Supabase auth storage:", supabaseKeys);
+      }
+    }
+  } catch (error) {
+    console.error("Error clearing Supabase storage:", error);
+  }
+};
 
 /**
  * Custom storage adapter for Supabase that safely handles different environments
@@ -11,31 +34,42 @@ export const createStorageAdapter = () => {
       try {
         // Only attempt to use AsyncStorage in a browser/native environment
         if (isBrowser()) {
-          return await AsyncStorage.getItem(key)
+          const value = await AsyncStorage.getItem(key);
+          // Validate that the stored data is valid JSON for auth tokens
+          if (value && key.includes("supabase.auth")) {
+            try {
+              JSON.parse(value);
+            } catch (e) {
+              console.error("Invalid JSON in storage for key:", key);
+              await AsyncStorage.removeItem(key);
+              return null;
+            }
+          }
+          return value;
         }
-        return null
+        return null;
       } catch (error) {
-        console.error('Storage adapter getItem error:', error)
-        return null
+        console.error("Storage adapter getItem error:", error);
+        return null;
       }
     },
     setItem: async (key: string, value: string): Promise<void> => {
       try {
         if (isBrowser()) {
-          await AsyncStorage.setItem(key, value)
+          await AsyncStorage.setItem(key, value);
         }
       } catch (error) {
-        console.error('Storage adapter setItem error:', error)
+        console.error("Storage adapter setItem error:", error);
       }
     },
     removeItem: async (key: string): Promise<void> => {
       try {
         if (isBrowser()) {
-          await AsyncStorage.removeItem(key)
+          await AsyncStorage.removeItem(key);
         }
       } catch (error) {
-        console.error('Storage adapter removeItem error:', error)
+        console.error("Storage adapter removeItem error:", error);
       }
-    }
-  }
-}
+    },
+  };
+};

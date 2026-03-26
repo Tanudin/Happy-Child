@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DivorceApp - Password Reset</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+          Cantarell, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+      }
+
+      .container {
+        background: white;
+        border-radius: 20px;
+        padding: 40px;
+        max-width: 500px;
+        width: 100%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        text-align: center;
+      }
+
+      .spinner {
+        width: 50px;
+        height: 50px;
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #667eea;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 20px;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      h1 {
+        color: #333;
+        margin-bottom: 15px;
+        font-size: 24px;
+      }
+
+      p {
+        color: #666;
+        line-height: 1.6;
+        margin-bottom: 15px;
+      }
+
+      .status {
+        margin: 20px 0;
+        padding: 15px;
+        border-radius: 10px;
+        font-weight: 500;
+      }
+
+      .status.success {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+
+      .status.error {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+
+      .status.info {
+        background-color: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+      }
+
+      .app-link {
+        display: inline-block;
+        margin-top: 20px;
+        padding: 15px 30px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        text-decoration: none;
+        border-radius: 10px;
+        font-weight: 600;
+        transition: transform 0.2s;
+      }
+
+      .app-link:hover {
+        transform: translateY(-2px);
+      }
+
+      .instructions {
+        margin-top: 30px;
+        padding-top: 30px;
+        border-top: 1px solid #eee;
+      }
+
+      .instructions h2 {
+        font-size: 18px;
+        color: #333;
+        margin-bottom: 15px;
+      }
+
+      .instructions ol {
+        text-align: left;
+        padding-left: 20px;
+      }
+
+      .instructions li {
+        margin-bottom: 10px;
+        color: #666;
+      }
+
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div id="loading">
+        <div class="spinner"></div>
+        <h1>Processing Password Reset...</h1>
+        <p>Please wait while we verify your reset link.</p>
+      </div>
+
+      <div id="success" class="hidden">
+        <h1>✅ Reset Link Verified!</h1>
+        <div class="status success" id="statusMessage">
+          Your password reset link has been verified.
+        </div>
+        <a href="#" id="openAppLink" class="app-link">Open Doplan App</a>
+
+        <div class="instructions">
+          <h2>What to do next:</h2>
+          <ol>
+            <li>Click the button above to open the Doplan app</li>
+            <li>
+              If the app doesn't open automatically, make sure Doplan is
+              installed
+            </li>
+            <li>Once in the app, you'll be able to set your new password</li>
+          </ol>
+        </div>
+      </div>
+
+      <div id="error" class="hidden">
+        <h1>⚠️ Invalid Reset Link</h1>
+        <div class="status error" id="errorMessage">
+          This password reset link is invalid or has expired.
+        </div>
+        <p>Please request a new password reset link from the app.</p>
+      </div>
+    </div>
+
+    <script>
+      // Extract hash parameters
+      function getHashParams() {
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        return {
+          access_token: params.get("access_token"),
+          refresh_token: params.get("refresh_token"),
+          type: params.get("type"),
+          error: params.get("error"),
+          error_description: params.get("error_description"),
+        };
+      }
+
+      // Check if user is on mobile
+      function isMobile() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent,
+        );
+      }
+
+      // Main function
+      function handleCallback() {
+        const params = getHashParams();
+
+        console.log("Callback params:", params);
+
+        // Hide loading
+        document.getElementById("loading").classList.add("hidden");
+
+        // Check for errors
+        if (params.error) {
+          document.getElementById("error").classList.remove("hidden");
+          document.getElementById("errorMessage").textContent =
+            params.error_description || "An error occurred. Please try again.";
+          return;
+        }
+
+        // Check if we have the required tokens
+        if (!params.access_token || params.type !== "recovery") {
+          document.getElementById("error").classList.remove("hidden");
+          document.getElementById("errorMessage").textContent =
+            "Missing authentication tokens. Please request a new reset link.";
+          return;
+        }
+
+        // Success!
+        document.getElementById("success").classList.remove("hidden");
+
+        // Build the deep link URL with all parameters
+        const deepLinkUrl = `doplan://auth/callback${window.location.hash}`;
+
+        // Set the app link
+        const appLink = document.getElementById("openAppLink");
+        appLink.href = deepLinkUrl;
+
+        // If on mobile, try to open the app automatically
+        if (isMobile()) {
+          document.getElementById("statusMessage").textContent =
+            "Attempting to open Doplan...";
+
+          // Try to open the app
+          window.location.href = deepLinkUrl;
+
+          // Fallback message after a delay
+          setTimeout(() => {
+            document.getElementById("statusMessage").innerHTML =
+              "<strong>App not opening?</strong><br>Make sure you have Doplan installed on your device.";
+          }, 3000);
+        } else {
+          // Desktop user
+          document.getElementById("statusMessage").innerHTML =
+            "<strong>Mobile device required</strong><br>Please open this link on your mobile device where Doplan is installed.";
+        }
+      }
+
+      // Run on page load
+      handleCallback();
+    </script>
+  </body>
+</html>
