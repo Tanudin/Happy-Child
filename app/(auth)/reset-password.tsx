@@ -1,13 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
-    Alert,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Colors } from "../../constants/Colors";
 import { useColorScheme } from "../../hooks/useColorScheme";
@@ -29,11 +29,42 @@ export default function ResetPassword({ onBack }: ResetPasswordProps) {
       return;
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      Alert.alert("Error", "Please enter your email address");
+      return;
+    }
+
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo:
-        "https://tanudin.github.io/brillin.github.io/doplan-redirect.html",
-    });
+
+    const { data: accountExists, error: checkError } = await supabase.rpc(
+      "email_exists_for_reset",
+      { input_email: normalizedEmail },
+    );
+
+    if (checkError) {
+      setLoading(false);
+      Alert.alert(
+        "Error",
+        "Could not verify this email right now. Please try again.",
+      );
+      return;
+    }
+
+    if (!accountExists) {
+      setLoading(false);
+      Alert.alert("No Account Found", "No account exists for this email.");
+      return;
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      normalizedEmail,
+      {
+        redirectTo:
+          "https://tanudin.github.io/brillin.github.io/doplan-redirect.html",
+      },
+    );
 
     if (error) {
       Alert.alert("Error", error.message);
@@ -41,7 +72,7 @@ export default function ResetPassword({ onBack }: ResetPasswordProps) {
       setEmailSent(true);
       Alert.alert(
         "Reset Email Sent",
-        "Check your email for a link to reset your password. If it doesn't appear within a few minutes, check your spam folder.",
+        "We sent a reset link to your email. If it doesn't appear within a few minutes, check your spam folder.",
       );
     }
     setLoading(false);

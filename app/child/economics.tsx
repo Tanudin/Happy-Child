@@ -1,9 +1,22 @@
-import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { supabase } from '@/lib/supabase';
-import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useState } from 'react';
-import { Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Colors } from "@/constants/Colors";
+import { useColorScheme } from "@/hooks/useColorScheme";
+import { supabase } from "@/lib/supabase";
+import { Ionicons } from "@expo/vector-icons";
+import React, { useEffect, useState } from "react";
+import {
+    Alert,
+    FlatList,
+    InputAccessoryView,
+    Keyboard,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from "react-native";
 
 interface Expense {
   id: string;
@@ -28,40 +41,51 @@ interface EconomicsProps {
   onBack: () => void;
 }
 
-export default function Economics({ childName, childId, onBack }: EconomicsProps) {
+export default function Economics({
+  childName,
+  childId,
+  onBack,
+}: EconomicsProps) {
   const colorScheme = useColorScheme();
+  const expenseDescriptionAccessoryId =
+    "economicsExpenseDescriptionInputAccessory";
+  const expenseAmountAccessoryId = "economicsExpenseAmountInputAccessory";
+  const expenseDateAccessoryId = "economicsExpenseDateInputAccessory";
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [parents, setParents] = useState<Parent[]>([]);
   const [showPayerDropdown, setShowPayerDropdown] = useState(false);
-  const [timeFilter, setTimeFilter] = useState<'week' | 'month' | 'total'>('total');
-  
+  const [timeFilter, setTimeFilter] = useState<
+    "week" | "month" | "year" | "total"
+  >("total");
+
   // Form state
-  const [description, setDescription] = useState('');
-  const [amount, setAmount] = useState('');
-  const [date, setDate] = useState('');
-  const [payer, setPayer] = useState('');
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState("");
+  const [payer, setPayer] = useState("");
 
   useEffect(() => {
     loadExpenses();
     fetchParents();
     // Set today's date as default
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split("T")[0];
     setDate(today);
   }, [childId]);
 
   const fetchParents = async () => {
     try {
       // Fetch all user_children links for this child
-      const { data: userChildrenData, error: userChildrenError } = await supabase
-        .from('user_children')
-        .select('user_id')
-        .eq('child_id', childId);
+      const { data: userChildrenData, error: userChildrenError } =
+        await supabase
+          .from("user_children")
+          .select("user_id")
+          .eq("child_id", childId);
 
       if (userChildrenError) {
-        console.error('Error fetching user_children:', userChildrenError);
+        console.error("Error fetching user_children:", userChildrenError);
         return;
       }
 
@@ -71,21 +95,21 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
       }
 
       // Get the user IDs
-      const userIds = userChildrenData.map(uc => uc.user_id);
+      const userIds = userChildrenData.map((uc) => uc.user_id);
 
       // Fetch user profiles for those user IDs
-      const { data: profilesData, error: profilesError} = await supabase
-        .from('user_profiles')
-        .select('user_id, email, display_name, first_name, last_name')
-        .in('user_id', userIds);
+      const { data: profilesData, error: profilesError } = await supabase
+        .from("user_profiles")
+        .select("user_id, email, display_name, first_name, last_name")
+        .in("user_id", userIds);
 
       if (profilesError) {
-        console.error('Error fetching profiles:', profilesError);
+        console.error("Error fetching profiles:", profilesError);
       } else {
         setParents(profilesData || []);
       }
     } catch (error) {
-      console.error('Error fetching parents:', error);
+      console.error("Error fetching parents:", error);
     }
   };
 
@@ -93,33 +117,37 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from('expenses')
-        .select('*')
-        .eq('child_id', childId)
-        .order('date', { ascending: false });
+        .from("expenses")
+        .select("*")
+        .eq("child_id", childId)
+        .order("date", { ascending: false });
 
       if (error) {
-        console.error('Error loading expenses:', error);
-        Alert.alert('Error', 'Failed to load expenses');
+        console.error("Error loading expenses:", error);
+        Alert.alert("Error", "Failed to load expenses");
         return;
       }
 
       setExpenses(data || []);
     } catch (error) {
-      console.error('Error loading expenses:', error);
-      Alert.alert('Error', 'Failed to load expenses');
+      console.error("Error loading expenses:", error);
+      Alert.alert("Error", "Failed to load expenses");
     } finally {
       setLoading(false);
     }
   };
 
   const resetForm = () => {
-    setDescription('');
-    setAmount('');
-    const today = new Date().toISOString().split('T')[0];
+    setDescription("");
+    setAmount("");
+    const today = new Date().toISOString().split("T")[0];
     setDate(today);
-    setPayer('');
+    setPayer("");
     setEditingExpense(null);
+  };
+
+  const dismissExpenseKeyboard = () => {
+    Keyboard.dismiss();
   };
 
   const openAddModal = () => {
@@ -137,21 +165,27 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
   };
 
   const handleSave = async () => {
-    if (!description.trim() || !amount.trim() || !date.trim() || !payer.trim()) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (
+      !description.trim() ||
+      !amount.trim() ||
+      !date.trim() ||
+      !payer.trim()
+    ) {
+      Alert.alert("Error", "Please fill in all fields");
       return;
     }
 
     const numericAmount = parseFloat(amount);
     if (isNaN(numericAmount) || numericAmount <= 0) {
-      Alert.alert('Error', 'Please enter a valid amount');
+      Alert.alert("Error", "Please enter a valid amount");
       return;
     }
 
     try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
       if (userError || !userData?.user?.id) {
-        Alert.alert('Error', 'Failed to get user information');
+        Alert.alert("Error", "Failed to get user information");
         return;
       }
 
@@ -168,24 +202,22 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
       if (editingExpense) {
         // Update existing expense
         const { error } = await supabase
-          .from('expenses')
+          .from("expenses")
           .update(expenseData)
-          .eq('id', editingExpense.id);
+          .eq("id", editingExpense.id);
 
         if (error) {
-          console.error('Error updating expense:', error);
-          Alert.alert('Error', 'Failed to update expense');
+          console.error("Error updating expense:", error);
+          Alert.alert("Error", "Failed to update expense");
           return;
         }
       } else {
         // Create new expense
-        const { error } = await supabase
-          .from('expenses')
-          .insert([expenseData]);
+        const { error } = await supabase.from("expenses").insert([expenseData]);
 
         if (error) {
-          console.error('Error creating expense:', error);
-          Alert.alert('Error', 'Failed to create expense');
+          console.error("Error creating expense:", error);
+          Alert.alert("Error", "Failed to create expense");
           return;
         }
       }
@@ -194,41 +226,41 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
       resetForm();
       loadExpenses(); // Reload the list
     } catch (error) {
-      console.error('Error saving expense:', error);
-      Alert.alert('Error', 'Failed to save expense');
+      console.error("Error saving expense:", error);
+      Alert.alert("Error", "Failed to save expense");
     }
   };
 
   const handleDelete = async (expenseId: string) => {
     Alert.alert(
-      'Delete Expense',
-      'Are you sure you want to delete this expense?',
+      "Delete Expense",
+      "Are you sure you want to delete this expense?",
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: "Cancel", style: "cancel" },
         {
-          text: 'Delete',
-          style: 'destructive',
+          text: "Delete",
+          style: "destructive",
           onPress: async () => {
             try {
               const { error } = await supabase
-                .from('expenses')
+                .from("expenses")
                 .delete()
-                .eq('id', expenseId);
+                .eq("id", expenseId);
 
               if (error) {
-                console.error('Error deleting expense:', error);
-                Alert.alert('Error', 'Failed to delete expense');
+                console.error("Error deleting expense:", error);
+                Alert.alert("Error", "Failed to delete expense");
                 return;
               }
 
               loadExpenses(); // Reload the list
             } catch (error) {
-              console.error('Error deleting expense:', error);
-              Alert.alert('Error', 'Failed to delete expense');
+              console.error("Error deleting expense:", error);
+              Alert.alert("Error", "Failed to delete expense");
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -241,6 +273,10 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
     return date.toLocaleDateString();
   };
 
+  const toLocalDate = (dateString: string) => {
+    return new Date(`${dateString}T00:00:00`);
+  };
+
   const getParentDisplayName = (parent: Parent) => {
     if (parent.display_name) {
       return parent.display_name;
@@ -248,63 +284,160 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
     return `${parent.first_name} ${parent.last_name}`.trim() || parent.email;
   };
 
-  const getTotalExpenses = () => {
+  const getFilteredExpenses = (filter: "week" | "month" | "year" | "total") => {
     const now = new Date();
-    let filteredExpenses = expenses;
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
 
-    if (timeFilter === 'week') {
-      // Get expenses from the last 7 days
-      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      filteredExpenses = expenses.filter(expense => new Date(expense.date) >= weekAgo);
-    } else if (timeFilter === 'month') {
-      // Get expenses from the current month
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      filteredExpenses = expenses.filter(expense => new Date(expense.date) >= startOfMonth);
+    if (filter === "week") {
+      const dayOfWeek = startOfToday.getDay();
+      const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const startOfWeek = new Date(startOfToday);
+      startOfWeek.setDate(startOfWeek.getDate() - mondayOffset);
+      return expenses.filter(
+        (expense) => toLocalDate(expense.date) >= startOfWeek,
+      );
     }
 
-    return filteredExpenses.reduce((total, expense) => total + expense.amount, 0);
+    if (filter === "month") {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      return expenses.filter(
+        (expense) => toLocalDate(expense.date) >= startOfMonth,
+      );
+    }
+
+    if (filter === "year") {
+      const startOfYear = new Date(now.getFullYear(), 0, 1);
+      return expenses.filter(
+        (expense) => toLocalDate(expense.date) >= startOfYear,
+      );
+    }
+
+    return expenses;
+  };
+
+  const getTotalExpenses = () => {
+    const filteredExpenses = getFilteredExpenses(timeFilter);
+    return filteredExpenses.reduce(
+      (total, expense) => total + expense.amount,
+      0,
+    );
+  };
+
+  const getTotalsByPayer = () => {
+    const totals: Record<
+      string,
+      { week: number; month: number; year: number; total: number }
+    > = {};
+
+    const accumulate = (
+      entries: Expense[],
+      key: "week" | "month" | "year" | "total",
+    ) => {
+      entries.forEach((expense) => {
+        const payerName = expense.payer?.trim() || "Unknown";
+        if (!totals[payerName]) {
+          totals[payerName] = { week: 0, month: 0, year: 0, total: 0 };
+        }
+        totals[payerName][key] += expense.amount;
+      });
+    };
+
+    accumulate(getFilteredExpenses("week"), "week");
+    accumulate(getFilteredExpenses("month"), "month");
+    accumulate(getFilteredExpenses("year"), "year");
+    accumulate(getFilteredExpenses("total"), "total");
+
+    return Object.entries(totals)
+      .map(([payerName, totalsByPeriod]) => ({ payerName, totalsByPeriod }))
+      .sort((a, b) => b.totalsByPeriod.total - a.totalsByPeriod.total);
   };
 
   const getFilterLabel = () => {
-    if (timeFilter === 'week') return 'This Week';
-    if (timeFilter === 'month') return 'This Month';
-    return 'Total';
+    if (timeFilter === "week") return "This Week";
+    if (timeFilter === "month") return "This Month";
+    if (timeFilter === "year") return "This Year";
+    return "Total";
   };
 
   const renderExpenseItem = ({ item }: { item: Expense }) => (
-    <View style={[styles.expenseItem, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground }]}>
+    <View
+      style={[
+        styles.expenseItem,
+        { backgroundColor: Colors[colorScheme ?? "light"].cardBackground },
+      ]}
+    >
       <View style={styles.expenseContent}>
         <View style={styles.expenseHeader}>
-          <Text style={[styles.expenseDescription, { color: Colors[colorScheme ?? 'light'].text }]}>
+          <Text
+            style={[
+              styles.expenseDescription,
+              { color: Colors[colorScheme ?? "light"].text },
+            ]}
+          >
             {item.description}
           </Text>
-          <Text style={[styles.expenseAmount, { color: Colors[colorScheme ?? 'light'].tint }]}>
+          <Text
+            style={[
+              styles.expenseAmount,
+              { color: Colors[colorScheme ?? "light"].tint },
+            ]}
+          >
             {formatCurrency(item.amount)}
           </Text>
         </View>
         <View style={styles.expenseDetails}>
-          <Text style={[styles.expenseDate, { color: Colors[colorScheme ?? 'light'].textSecondary }]}>
+          <Text
+            style={[
+              styles.expenseDate,
+              { color: Colors[colorScheme ?? "light"].textSecondary },
+            ]}
+          >
             {formatDate(item.date)}
           </Text>
-          <Text style={[styles.expensePayer, { color: Colors[colorScheme ?? 'light'].textSecondary }]}>
+          <Text
+            style={[
+              styles.expensePayer,
+              { color: Colors[colorScheme ?? "light"].textSecondary },
+            ]}
+          >
             Paid by: {item.payer}
           </Text>
         </View>
       </View>
       <View style={styles.expenseActions}>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => openEditModal(item)}
-          style={[styles.actionButton, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}
+          style={[
+            styles.actionButton,
+            { backgroundColor: Colors[colorScheme ?? "light"].tint },
+          ]}
         >
-          <Text style={[styles.actionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>
+          <Text
+            style={[
+              styles.actionButtonText,
+              { color: Colors[colorScheme ?? "light"].buttonText },
+            ]}
+          >
             Edit
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => handleDelete(item.id)}
-          style={[styles.actionButton, { backgroundColor: Colors[colorScheme ?? 'light'].accent }]}
+          style={[
+            styles.actionButton,
+            { backgroundColor: Colors[colorScheme ?? "light"].accent },
+          ]}
         >
-          <Text style={[styles.actionButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>
+          <Text
+            style={[
+              styles.actionButtonText,
+              { color: Colors[colorScheme ?? "light"].buttonText },
+            ]}
+          >
             Delete
           </Text>
         </TouchableOpacity>
@@ -314,9 +447,19 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
 
   if (loading) {
     return (
-      <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+      <View
+        style={[
+          styles.container,
+          { backgroundColor: Colors[colorScheme ?? "light"].background },
+        ]}
+      >
         <View style={styles.loadingContainer}>
-          <Text style={[styles.loadingText, { color: Colors[colorScheme ?? 'light'].text }]}>
+          <Text
+            style={[
+              styles.loadingText,
+              { color: Colors[colorScheme ?? "light"].text },
+            ]}
+          >
             Loading expenses...
           </Text>
         </View>
@@ -325,23 +468,46 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: Colors[colorScheme ?? 'light'].background }]}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: Colors[colorScheme ?? "light"].background },
+      ]}
+    >
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={Colors[colorScheme ?? 'light'].text} />
+          <Ionicons
+            name="arrow-back"
+            size={24}
+            color={Colors[colorScheme ?? "light"].text}
+          />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
+        <Text
+          style={[
+            styles.headerTitle,
+            { color: Colors[colorScheme ?? "light"].text },
+          ]}
+        >
           Expenses - {childName}
         </Text>
       </View>
-      
+
       {/* Content */}
       <View style={styles.content}>
-
         {/* Summary Card */}
-        <View style={[styles.summaryCard, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground }]}>
-          <Text style={[styles.summaryTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
+        <View
+          style={[
+            styles.summaryCard,
+            { backgroundColor: Colors[colorScheme ?? "light"].cardBackground },
+          ]}
+        >
+          <Text
+            style={[
+              styles.summaryTitle,
+              { color: Colors[colorScheme ?? "light"].text },
+            ]}
+          >
             Total Expenses - {getFilterLabel()}
           </Text>
 
@@ -350,90 +516,292 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
             <TouchableOpacity
               style={[
                 styles.filterButton,
-                timeFilter === 'week' && styles.filterButtonActive,
-                { 
-                  backgroundColor: timeFilter === 'week' 
-                    ? Colors[colorScheme ?? 'light'].tint 
-                    : Colors[colorScheme ?? 'light'].inputBackground,
-                  borderColor: Colors[colorScheme ?? 'light'].border
-                }
+                timeFilter === "week" && styles.filterButtonActive,
+                {
+                  backgroundColor:
+                    timeFilter === "week"
+                      ? Colors[colorScheme ?? "light"].tint
+                      : Colors[colorScheme ?? "light"].inputBackground,
+                  borderColor: Colors[colorScheme ?? "light"].border,
+                },
               ]}
-              onPress={() => setTimeFilter('week')}
+              onPress={() => setTimeFilter("week")}
             >
-              <Text style={[
-                styles.filterButtonText,
-                { color: timeFilter === 'week' 
-                  ? Colors[colorScheme ?? 'light'].buttonText 
-                  : Colors[colorScheme ?? 'light'].text 
-                }
-              ]}>
+              <Text
+                style={[
+                  styles.filterButtonText,
+                  {
+                    color:
+                      timeFilter === "week"
+                        ? Colors[colorScheme ?? "light"].buttonText
+                        : Colors[colorScheme ?? "light"].text,
+                  },
+                ]}
+              >
                 Week
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.filterButton,
-                timeFilter === 'month' && styles.filterButtonActive,
-                { 
-                  backgroundColor: timeFilter === 'month' 
-                    ? Colors[colorScheme ?? 'light'].tint 
-                    : Colors[colorScheme ?? 'light'].inputBackground,
-                  borderColor: Colors[colorScheme ?? 'light'].border
-                }
+                timeFilter === "year" && styles.filterButtonActive,
+                {
+                  backgroundColor:
+                    timeFilter === "year"
+                      ? Colors[colorScheme ?? "light"].tint
+                      : Colors[colorScheme ?? "light"].inputBackground,
+                  borderColor: Colors[colorScheme ?? "light"].border,
+                },
               ]}
-              onPress={() => setTimeFilter('month')}
+              onPress={() => setTimeFilter("year")}
             >
-              <Text style={[
-                styles.filterButtonText,
-                { color: timeFilter === 'month' 
-                  ? Colors[colorScheme ?? 'light'].buttonText 
-                  : Colors[colorScheme ?? 'light'].text 
-                }
-              ]}>
+              <Text
+                style={[
+                  styles.filterButtonText,
+                  {
+                    color:
+                      timeFilter === "year"
+                        ? Colors[colorScheme ?? "light"].buttonText
+                        : Colors[colorScheme ?? "light"].text,
+                  },
+                ]}
+              >
+                Year
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                timeFilter === "month" && styles.filterButtonActive,
+                {
+                  backgroundColor:
+                    timeFilter === "month"
+                      ? Colors[colorScheme ?? "light"].tint
+                      : Colors[colorScheme ?? "light"].inputBackground,
+                  borderColor: Colors[colorScheme ?? "light"].border,
+                },
+              ]}
+              onPress={() => setTimeFilter("month")}
+            >
+              <Text
+                style={[
+                  styles.filterButtonText,
+                  {
+                    color:
+                      timeFilter === "month"
+                        ? Colors[colorScheme ?? "light"].buttonText
+                        : Colors[colorScheme ?? "light"].text,
+                  },
+                ]}
+              >
                 Month
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.filterButton,
-                timeFilter === 'total' && styles.filterButtonActive,
-                { 
-                  backgroundColor: timeFilter === 'total' 
-                    ? Colors[colorScheme ?? 'light'].tint 
-                    : Colors[colorScheme ?? 'light'].inputBackground,
-                  borderColor: Colors[colorScheme ?? 'light'].border
-                }
+                timeFilter === "total" && styles.filterButtonActive,
+                {
+                  backgroundColor:
+                    timeFilter === "total"
+                      ? Colors[colorScheme ?? "light"].tint
+                      : Colors[colorScheme ?? "light"].inputBackground,
+                  borderColor: Colors[colorScheme ?? "light"].border,
+                },
               ]}
-              onPress={() => setTimeFilter('total')}
+              onPress={() => setTimeFilter("total")}
             >
-              <Text style={[
-                styles.filterButtonText,
-                { color: timeFilter === 'total' 
-                  ? Colors[colorScheme ?? 'light'].buttonText 
-                  : Colors[colorScheme ?? 'light'].text 
-                }
-              ]}>
+              <Text
+                style={[
+                  styles.filterButtonText,
+                  {
+                    color:
+                      timeFilter === "total"
+                        ? Colors[colorScheme ?? "light"].buttonText
+                        : Colors[colorScheme ?? "light"].text,
+                  },
+                ]}
+              >
                 Total
               </Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={[styles.summaryAmount, { color: Colors[colorScheme ?? 'light'].tint }]}>
+          <Text
+            style={[
+              styles.summaryAmount,
+              { color: Colors[colorScheme ?? "light"].tint },
+            ]}
+          >
             {formatCurrency(getTotalExpenses())}
           </Text>
-          <Text style={[styles.summaryCount, { color: Colors[colorScheme ?? 'light'].textSecondary }]}>
-            {expenses.length} {expenses.length === 1 ? 'expense' : 'expenses'}
+          <Text
+            style={[
+              styles.summaryCount,
+              { color: Colors[colorScheme ?? "light"].textSecondary },
+            ]}
+          >
+            {getFilteredExpenses(timeFilter).length}{" "}
+            {getFilteredExpenses(timeFilter).length === 1
+              ? "expense"
+              : "expenses"}
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.summaryCard,
+            { backgroundColor: Colors[colorScheme ?? "light"].cardBackground },
+          ]}
+        >
+          <Text
+            style={[
+              styles.summaryTitle,
+              { color: Colors[colorScheme ?? "light"].text },
+            ]}
+          >
+            Per Person Totals
+          </Text>
+          <View
+            style={[
+              styles.payerTotalsHeader,
+              { borderBottomColor: Colors[colorScheme ?? "light"].border },
+            ]}
+          >
+            <Text
+              style={[
+                styles.payerNameHeader,
+                { color: Colors[colorScheme ?? "light"].textSecondary },
+              ]}
+            >
+              Person
+            </Text>
+            <Text
+              style={[
+                styles.payerPeriodHeader,
+                { color: Colors[colorScheme ?? "light"].textSecondary },
+              ]}
+            >
+              W
+            </Text>
+            <Text
+              style={[
+                styles.payerPeriodHeader,
+                { color: Colors[colorScheme ?? "light"].textSecondary },
+              ]}
+            >
+              M
+            </Text>
+            <Text
+              style={[
+                styles.payerPeriodHeader,
+                { color: Colors[colorScheme ?? "light"].textSecondary },
+              ]}
+            >
+              Y
+            </Text>
+            <Text
+              style={[
+                styles.payerPeriodHeader,
+                { color: Colors[colorScheme ?? "light"].textSecondary },
+              ]}
+            >
+              T
+            </Text>
+          </View>
+
+          {getTotalsByPayer().length === 0 ? (
+            <Text
+              style={[
+                styles.noPayerTotalsText,
+                { color: Colors[colorScheme ?? "light"].textLight },
+              ]}
+            >
+              No expenses yet
+            </Text>
+          ) : (
+            getTotalsByPayer().map(({ payerName, totalsByPeriod }) => (
+              <View
+                key={payerName}
+                style={[
+                  styles.payerTotalsRow,
+                  { borderBottomColor: Colors[colorScheme ?? "light"].border },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.payerNameCell,
+                    { color: Colors[colorScheme ?? "light"].text },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {payerName}
+                </Text>
+                <Text
+                  style={[
+                    styles.payerPeriodCell,
+                    { color: Colors[colorScheme ?? "light"].text },
+                  ]}
+                >
+                  {formatCurrency(totalsByPeriod.week)}
+                </Text>
+                <Text
+                  style={[
+                    styles.payerPeriodCell,
+                    { color: Colors[colorScheme ?? "light"].text },
+                  ]}
+                >
+                  {formatCurrency(totalsByPeriod.month)}
+                </Text>
+                <Text
+                  style={[
+                    styles.payerPeriodCell,
+                    { color: Colors[colorScheme ?? "light"].text },
+                  ]}
+                >
+                  {formatCurrency(totalsByPeriod.year)}
+                </Text>
+                <Text
+                  style={[
+                    styles.payerPeriodCell,
+                    {
+                      color: Colors[colorScheme ?? "light"].text,
+                      fontWeight: "700",
+                    },
+                  ]}
+                >
+                  {formatCurrency(totalsByPeriod.total)}
+                </Text>
+              </View>
+            ))
+          )}
+          <Text
+            style={[
+              styles.payerTotalsLegend,
+              { color: Colors[colorScheme ?? "light"].textLight },
+            ]}
+          >
+            W = week, M = month, Y = year, T = total
           </Text>
         </View>
 
         {/* Add Expense Button */}
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={openAddModal}
-          style={[styles.addButton, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}
+          style={[
+            styles.addButton,
+            { backgroundColor: Colors[colorScheme ?? "light"].tint },
+          ]}
         >
-          <Text style={[styles.addButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>
+          <Text
+            style={[
+              styles.addButtonText,
+              { color: Colors[colorScheme ?? "light"].buttonText },
+            ]}
+          >
             Add New Expense
           </Text>
         </TouchableOpacity>
@@ -448,10 +816,20 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyIcon}>💰</Text>
-              <Text style={[styles.emptyText, { color: Colors[colorScheme ?? 'light'].textSecondary }]}>
+              <Text
+                style={[
+                  styles.emptyText,
+                  { color: Colors[colorScheme ?? "light"].textSecondary },
+                ]}
+              >
                 No expenses yet
               </Text>
-              <Text style={[styles.emptySubtext, { color: Colors[colorScheme ?? 'light'].textLight }]}>
+              <Text
+                style={[
+                  styles.emptySubtext,
+                  { color: Colors[colorScheme ?? "light"].textLight },
+                ]}
+              >
                 Tap "Add New Expense" to get started
               </Text>
             </View>
@@ -467,112 +845,223 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground }]}>
+          <View
+            style={[
+              styles.modalContent,
+              {
+                backgroundColor: Colors[colorScheme ?? "light"].cardBackground,
+              },
+            ]}
+          >
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={[styles.modalTitle, { color: Colors[colorScheme ?? 'light'].text }]}>
-                {editingExpense ? 'Edit Expense' : 'Add New Expense'}
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: Colors[colorScheme ?? "light"].text },
+                ]}
+              >
+                {editingExpense ? "Edit Expense" : "Add New Expense"}
               </Text>
 
               <View style={styles.inputContainer}>
-                <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>
+                <Text
+                  style={[
+                    styles.inputLabel,
+                    { color: Colors[colorScheme ?? "light"].text },
+                  ]}
+                >
                   Description
                 </Text>
                 <TextInput
-                  style={[styles.textInput, { 
-                    backgroundColor: Colors[colorScheme ?? 'light'].inputBackground,
-                    color: Colors[colorScheme ?? 'light'].text,
-                    borderColor: Colors[colorScheme ?? 'light'].border
-                  }]}
+                  style={[
+                    styles.textInput,
+                    {
+                      backgroundColor:
+                        Colors[colorScheme ?? "light"].inputBackground,
+                      color: Colors[colorScheme ?? "light"].text,
+                      borderColor: Colors[colorScheme ?? "light"].border,
+                    },
+                  ]}
                   value={description}
                   onChangeText={setDescription}
                   placeholder="What was this expense for?"
-                  placeholderTextColor={Colors[colorScheme ?? 'light'].textLight}
+                  placeholderTextColor={
+                    Colors[colorScheme ?? "light"].textLight
+                  }
+                  inputAccessoryViewID={
+                    Platform.OS === "ios"
+                      ? expenseDescriptionAccessoryId
+                      : undefined
+                  }
+                  returnKeyType="done"
+                  onSubmitEditing={dismissExpenseKeyboard}
                 />
               </View>
 
               <View style={styles.inputContainer}>
-                <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>
+                <Text
+                  style={[
+                    styles.inputLabel,
+                    { color: Colors[colorScheme ?? "light"].text },
+                  ]}
+                >
                   Amount
                 </Text>
                 <TextInput
-                  style={[styles.textInput, { 
-                    backgroundColor: Colors[colorScheme ?? 'light'].inputBackground,
-                    color: Colors[colorScheme ?? 'light'].text,
-                    borderColor: Colors[colorScheme ?? 'light'].border
-                  }]}
+                  style={[
+                    styles.textInput,
+                    {
+                      backgroundColor:
+                        Colors[colorScheme ?? "light"].inputBackground,
+                      color: Colors[colorScheme ?? "light"].text,
+                      borderColor: Colors[colorScheme ?? "light"].border,
+                    },
+                  ]}
                   value={amount}
                   onChangeText={setAmount}
                   placeholder="0.00"
-                  placeholderTextColor={Colors[colorScheme ?? 'light'].textLight}
+                  placeholderTextColor={
+                    Colors[colorScheme ?? "light"].textLight
+                  }
                   keyboardType="numeric"
+                  inputAccessoryViewID={
+                    Platform.OS === "ios" ? expenseAmountAccessoryId : undefined
+                  }
+                  returnKeyType="done"
+                  onSubmitEditing={dismissExpenseKeyboard}
                 />
               </View>
 
               <View style={styles.inputContainer}>
-                <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>
+                <Text
+                  style={[
+                    styles.inputLabel,
+                    { color: Colors[colorScheme ?? "light"].text },
+                  ]}
+                >
                   Date
                 </Text>
                 <TextInput
-                  style={[styles.textInput, { 
-                    backgroundColor: Colors[colorScheme ?? 'light'].inputBackground,
-                    color: Colors[colorScheme ?? 'light'].text,
-                    borderColor: Colors[colorScheme ?? 'light'].border
-                  }]}
+                  style={[
+                    styles.textInput,
+                    {
+                      backgroundColor:
+                        Colors[colorScheme ?? "light"].inputBackground,
+                      color: Colors[colorScheme ?? "light"].text,
+                      borderColor: Colors[colorScheme ?? "light"].border,
+                    },
+                  ]}
                   value={date}
                   onChangeText={setDate}
                   placeholder="YYYY-MM-DD"
-                  placeholderTextColor={Colors[colorScheme ?? 'light'].textLight}
+                  placeholderTextColor={
+                    Colors[colorScheme ?? "light"].textLight
+                  }
+                  inputAccessoryViewID={
+                    Platform.OS === "ios" ? expenseDateAccessoryId : undefined
+                  }
+                  keyboardType={
+                    Platform.OS === "ios"
+                      ? "numbers-and-punctuation"
+                      : "default"
+                  }
+                  returnKeyType="done"
+                  onSubmitEditing={dismissExpenseKeyboard}
                 />
               </View>
 
               <View style={styles.inputContainer}>
-                <Text style={[styles.inputLabel, { color: Colors[colorScheme ?? 'light'].text }]}>
+                <Text
+                  style={[
+                    styles.inputLabel,
+                    { color: Colors[colorScheme ?? "light"].text },
+                  ]}
+                >
                   Who Paid?
                 </Text>
                 <TouchableOpacity
-                  style={[styles.dropdownButton, { 
-                    backgroundColor: Colors[colorScheme ?? 'light'].inputBackground,
-                    borderColor: Colors[colorScheme ?? 'light'].border
-                  }]}
+                  style={[
+                    styles.dropdownButton,
+                    {
+                      backgroundColor:
+                        Colors[colorScheme ?? "light"].inputBackground,
+                      borderColor: Colors[colorScheme ?? "light"].border,
+                    },
+                  ]}
                   onPress={() => setShowPayerDropdown(!showPayerDropdown)}
                 >
-                  <Text style={[styles.dropdownButtonText, { 
-                    color: payer ? Colors[colorScheme ?? 'light'].text : Colors[colorScheme ?? 'light'].textLight
-                  }]}>
-                    {payer || 'Select who paid'}
+                  <Text
+                    style={[
+                      styles.dropdownButtonText,
+                      {
+                        color: payer
+                          ? Colors[colorScheme ?? "light"].text
+                          : Colors[colorScheme ?? "light"].textLight,
+                      },
+                    ]}
+                  >
+                    {payer || "Select who paid"}
                   </Text>
-                  <Text style={[styles.dropdownArrow, { color: Colors[colorScheme ?? 'light'].text }]}>
-                    {showPayerDropdown ? '▲' : '▼'}
+                  <Text
+                    style={[
+                      styles.dropdownArrow,
+                      { color: Colors[colorScheme ?? "light"].text },
+                    ]}
+                  >
+                    {showPayerDropdown ? "▲" : "▼"}
                   </Text>
                 </TouchableOpacity>
-                
+
                 {showPayerDropdown && (
-                  <View style={[styles.dropdownList, { 
-                    backgroundColor: Colors[colorScheme ?? 'light'].cardBackground,
-                    borderColor: Colors[colorScheme ?? 'light'].border
-                  }]}>
+                  <View
+                    style={[
+                      styles.dropdownList,
+                      {
+                        backgroundColor:
+                          Colors[colorScheme ?? "light"].cardBackground,
+                        borderColor: Colors[colorScheme ?? "light"].border,
+                      },
+                    ]}
+                  >
                     {parents.length > 0 ? (
                       parents.map((parent) => (
                         <TouchableOpacity
                           key={parent.user_id}
-                          style={[styles.dropdownItem, {
-                            backgroundColor: payer === getParentDisplayName(parent)
-                              ? `${Colors[colorScheme ?? 'light'].tint}20`
-                              : 'transparent'
-                          }]}
+                          style={[
+                            styles.dropdownItem,
+                            {
+                              backgroundColor:
+                                payer === getParentDisplayName(parent)
+                                  ? `${Colors[colorScheme ?? "light"].tint}20`
+                                  : "transparent",
+                            },
+                          ]}
                           onPress={() => {
                             setPayer(getParentDisplayName(parent));
                             setShowPayerDropdown(false);
                           }}
                         >
-                          <Text style={[styles.dropdownItemText, { color: Colors[colorScheme ?? 'light'].text }]}>
+                          <Text
+                            style={[
+                              styles.dropdownItemText,
+                              { color: Colors[colorScheme ?? "light"].text },
+                            ]}
+                          >
                             {getParentDisplayName(parent)}
                           </Text>
                         </TouchableOpacity>
                       ))
                     ) : (
                       <View style={styles.dropdownItem}>
-                        <Text style={[styles.dropdownItemText, { color: Colors[colorScheme ?? 'light'].textSecondary }]}>
+                        <Text
+                          style={[
+                            styles.dropdownItemText,
+                            {
+                              color:
+                                Colors[colorScheme ?? "light"].textSecondary,
+                            },
+                          ]}
+                        >
                           No parents found
                         </Text>
                       </View>
@@ -582,27 +1071,128 @@ export default function Economics({ childName, childId, onBack }: EconomicsProps
               </View>
 
               <View style={styles.modalActions}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => setModalVisible(false)}
-                  style={[styles.modalButton, styles.cancelButton, { 
-                    backgroundColor: Colors[colorScheme ?? 'light'].inputBackground,
-                    borderColor: Colors[colorScheme ?? 'light'].border
-                  }]}
+                  style={[
+                    styles.modalButton,
+                    styles.cancelButton,
+                    {
+                      backgroundColor:
+                        Colors[colorScheme ?? "light"].inputBackground,
+                      borderColor: Colors[colorScheme ?? "light"].border,
+                    },
+                  ]}
                 >
-                  <Text style={[styles.modalButtonText, { color: Colors[colorScheme ?? 'light'].text }]}>
+                  <Text
+                    style={[
+                      styles.modalButtonText,
+                      { color: Colors[colorScheme ?? "light"].text },
+                    ]}
+                  >
                     Cancel
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={handleSave}
-                  style={[styles.modalButton, styles.saveButton, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}
+                  style={[
+                    styles.modalButton,
+                    styles.saveButton,
+                    { backgroundColor: Colors[colorScheme ?? "light"].tint },
+                  ]}
                 >
-                  <Text style={[styles.modalButtonText, { color: Colors[colorScheme ?? 'light'].buttonText }]}>
-                    {editingExpense ? 'Update' : 'Save'}
+                  <Text
+                    style={[
+                      styles.modalButtonText,
+                      { color: Colors[colorScheme ?? "light"].buttonText },
+                    ]}
+                  >
+                    {editingExpense ? "Update" : "Save"}
                   </Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
+            {Platform.OS === "ios" ? (
+              <>
+                <InputAccessoryView nativeID={expenseDescriptionAccessoryId}>
+                  <View
+                    style={[
+                      styles.keyboardAccessory,
+                      {
+                        backgroundColor:
+                          Colors[colorScheme ?? "light"].cardBackground,
+                        borderTopColor: Colors[colorScheme ?? "light"].border,
+                      },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      style={styles.keyboardAccessoryDoneButton}
+                      onPress={dismissExpenseKeyboard}
+                    >
+                      <Text
+                        style={[
+                          styles.keyboardAccessoryDoneText,
+                          { color: Colors[colorScheme ?? "light"].tint },
+                        ]}
+                      >
+                        Done
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </InputAccessoryView>
+                <InputAccessoryView nativeID={expenseAmountAccessoryId}>
+                  <View
+                    style={[
+                      styles.keyboardAccessory,
+                      {
+                        backgroundColor:
+                          Colors[colorScheme ?? "light"].cardBackground,
+                        borderTopColor: Colors[colorScheme ?? "light"].border,
+                      },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      style={styles.keyboardAccessoryDoneButton}
+                      onPress={dismissExpenseKeyboard}
+                    >
+                      <Text
+                        style={[
+                          styles.keyboardAccessoryDoneText,
+                          { color: Colors[colorScheme ?? "light"].tint },
+                        ]}
+                      >
+                        Done
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </InputAccessoryView>
+                <InputAccessoryView nativeID={expenseDateAccessoryId}>
+                  <View
+                    style={[
+                      styles.keyboardAccessory,
+                      {
+                        backgroundColor:
+                          Colors[colorScheme ?? "light"].cardBackground,
+                        borderTopColor: Colors[colorScheme ?? "light"].border,
+                      },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      style={styles.keyboardAccessoryDoneButton}
+                      onPress={dismissExpenseKeyboard}
+                    >
+                      <Text
+                        style={[
+                          styles.keyboardAccessoryDoneText,
+                          { color: Colors[colorScheme ?? "light"].tint },
+                        ]}
+                      >
+                        Done
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </InputAccessoryView>
+              </>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -615,8 +1205,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 20,
@@ -627,7 +1217,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     flex: 1,
   },
   content: {
@@ -636,31 +1226,31 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 28,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontWeight: "bold",
+    textAlign: "center",
     marginBottom: 10,
   },
   subtitle: {
     fontSize: 18,
-    textAlign: 'center',
+    textAlign: "center",
     marginBottom: 20,
     opacity: 0.7,
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   loadingText: {
     fontSize: 18,
-    textAlign: 'center',
+    textAlign: "center",
   },
   summaryCard: {
     padding: 20,
     borderRadius: 12,
     marginBottom: 20,
-    alignItems: 'center',
-    shadowColor: '#000',
+    alignItems: "center",
+    shadowColor: "#000",
     shadowOffset: {
       width: 0,
       height: 2,
@@ -671,44 +1261,92 @@ const styles = StyleSheet.create({
   },
   summaryTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
     marginBottom: 8,
   },
   summaryAmount: {
     fontSize: 32,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginBottom: 4,
   },
   summaryCount: {
     fontSize: 14,
   },
+  payerTotalsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    paddingBottom: 8,
+    marginTop: 4,
+  },
+  payerTotalsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    paddingVertical: 10,
+  },
+  payerNameHeader: {
+    flex: 1.6,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  payerPeriodHeader: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "right",
+  },
+  payerNameCell: {
+    flex: 1.6,
+    fontSize: 14,
+    fontWeight: "600",
+    paddingRight: 8,
+  },
+  payerPeriodCell: {
+    flex: 1,
+    fontSize: 12,
+    textAlign: "right",
+  },
+  noPayerTotalsText: {
+    marginTop: 12,
+    fontSize: 14,
+    textAlign: "center",
+  },
+  payerTotalsLegend: {
+    marginTop: 10,
+    fontSize: 11,
+    textAlign: "right",
+  },
   filterContainer: {
-    flexDirection: 'row',
-    gap: 10,
+    flexDirection: "row",
+    gap: 8,
     marginVertical: 16,
-    justifyContent: 'center',
+    justifyContent: "space-between",
+    width: "100%",
+    alignSelf: "stretch",
   },
   filterButton: {
-    paddingHorizontal: 16,
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 8,
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    minWidth: 80,
-    alignItems: 'center',
+    alignItems: "center",
   },
   filterButtonActive: {
     // Active state styling is handled by backgroundColor in the component
   },
   filterButtonText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   addButton: {
     padding: 16,
     borderRadius: 12,
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 20,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: {
       width: 0,
       height: 2,
@@ -719,17 +1357,17 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   expensesList: {
     flex: 1,
   },
   expenseItem: {
-    flexDirection: 'row',
+    flexDirection: "row",
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: {
       width: 0,
       height: 1,
@@ -742,24 +1380,24 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   expenseHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
     marginBottom: 8,
   },
   expenseDescription: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
     flex: 1,
     marginRight: 12,
   },
   expenseAmount: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   expenseDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
   expenseDate: {
     fontSize: 14,
@@ -768,7 +1406,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   expenseActions: {
-    flexDirection: 'column',
+    flexDirection: "column",
     gap: 8,
     marginLeft: 12,
   },
@@ -777,16 +1415,16 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 6,
     minWidth: 60,
-    alignItems: 'center',
+    alignItems: "center",
   },
   actionButtonText: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   emptyContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingVertical: 60,
   },
   emptyIcon: {
@@ -795,31 +1433,31 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: "600",
     marginBottom: 8,
-    textAlign: 'center',
+    textAlign: "center",
   },
   emptySubtext: {
     fontSize: 14,
-    textAlign: 'center',
+    textAlign: "center",
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   modalContent: {
-    width: '90%',
+    width: "90%",
     maxWidth: 400,
     borderRadius: 12,
     padding: 24,
-    maxHeight: '80%',
+    maxHeight: "80%",
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontWeight: "bold",
+    textAlign: "center",
     marginBottom: 24,
   },
   inputContainer: {
@@ -827,7 +1465,7 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
     marginBottom: 8,
   },
   textInput: {
@@ -841,9 +1479,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   dropdownButtonText: {
     fontSize: 16,
@@ -862,14 +1500,14 @@ const styles = StyleSheet.create({
   dropdownItem: {
     padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: "#e0e0e0",
   },
   dropdownItemText: {
     fontSize: 16,
   },
   modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginTop: 24,
     gap: 12,
   },
@@ -877,7 +1515,7 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     borderRadius: 8,
-    alignItems: 'center',
+    alignItems: "center",
     borderWidth: 1,
   },
   cancelButton: {
@@ -888,6 +1526,20 @@ const styles = StyleSheet.create({
   },
   modalButtonText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
+  },
+  keyboardAccessory: {
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: "flex-end",
+  },
+  keyboardAccessoryDoneButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  keyboardAccessoryDoneText: {
+    fontSize: 17,
+    fontWeight: "600",
   },
 });

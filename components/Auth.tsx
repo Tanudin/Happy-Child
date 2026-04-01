@@ -20,6 +20,34 @@ export default function Auth({
   >("welcome");
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
+  const parseAuthLink = (url: string) => {
+    let accessToken: string | null = null;
+    let refreshToken: string | null = null;
+    let type: string | null = null;
+
+    if (url.includes("#")) {
+      const hashPart = url.split("#")[1];
+      const hashParams = new URLSearchParams(hashPart);
+      accessToken = hashParams.get("access_token");
+      refreshToken = hashParams.get("refresh_token");
+      type = hashParams.get("type");
+    } else {
+      const urlObj = new URL(url.replace("doplan://", "http://doplan/"));
+      accessToken = urlObj.searchParams.get("access_token");
+      refreshToken = urlObj.searchParams.get("refresh_token");
+      type = urlObj.searchParams.get("type");
+    }
+
+    return {
+      accessToken,
+      refreshToken,
+      type: type?.toLowerCase() ?? null,
+    };
+  };
+
+  const isRecoveryType = (type: string | null) =>
+    type === "recovery" || type === "password_recovery";
+
   useEffect(() => {
     // If forceShow is true, we're being shown for password recovery
     if (forceShow && !isPasswordRecovery) {
@@ -30,59 +58,34 @@ export default function Auth({
     // Handle deep linking for password recovery
     const handleDeepLink = async (url: string) => {
       console.log("Deep link received:", url);
+      const { accessToken, refreshToken, type } = parseAuthLink(url);
 
-      if (
-        url.includes("type=recovery") ||
-        url.includes("password_recovery") ||
-        url.includes("access_token")
-      ) {
-        // Extract tokens from hash fragment (after #)
-        // URL format: doplan://auth/callback#access_token=xxx&refresh_token=yyy&type=recovery
-        let accessToken = null;
-        let refreshToken = null;
-        let type = null;
+      if (!accessToken) {
+        return;
+      }
 
-        // Check if there's a hash fragment
-        if (url.includes("#")) {
-          const hashPart = url.split("#")[1];
-          const hashParams = new URLSearchParams(hashPart);
-          accessToken = hashParams.get("access_token");
-          refreshToken = hashParams.get("refresh_token");
-          type = hashParams.get("type");
+      console.log("Auth link detected");
+      console.log("Type:", type);
+      console.log("Has access token:", !!accessToken);
+      console.log("Has refresh token:", !!refreshToken);
+
+      try {
+        const { data, error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken || "",
+        });
+
+        if (error) {
+          console.error("Error setting session from deep link:", error);
         } else {
-          // Fallback: try as regular URL parameters
-          const urlObj = new URL(url.replace("doplan://", "http://doplan/"));
-          accessToken = urlObj.searchParams.get("access_token");
-          refreshToken = urlObj.searchParams.get("refresh_token");
-          type = urlObj.searchParams.get("type");
+          console.log("Session set successfully from deep link");
+          console.log("Session data:", data);
         }
+      } catch (err) {
+        console.error("Exception setting session:", err);
+      }
 
-        console.log("Password recovery detected");
-        console.log("Type:", type);
-        console.log("Has access token:", !!accessToken);
-        console.log("Has refresh token:", !!refreshToken);
-
-        // If we have tokens, set the session
-        if (accessToken) {
-          try {
-            const { data, error } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken || "",
-            });
-
-            if (error) {
-              console.error("Error setting session from deep link:", error);
-            } else {
-              console.log("Session set successfully from deep link");
-              console.log("Session data:", data);
-            }
-          } catch (err) {
-            console.error("Exception setting session:", err);
-          }
-        } else {
-          console.error("No access token found in URL");
-        }
-
+      if (isRecoveryType(type)) {
         setIsPasswordRecovery(true);
         setCurrentView("new-password");
       }
@@ -126,12 +129,7 @@ export default function Auth({
       } else if (event === "SIGNED_IN" && session?.user) {
         // Check if this sign in is from a recovery email
         const currentUrl = await Linking.getInitialURL();
-        if (
-          currentUrl &&
-          (currentUrl.includes("type=recovery") ||
-            currentUrl.includes("password_recovery") ||
-            currentUrl.includes("access_token"))
-        ) {
+        if (currentUrl && isRecoveryType(parseAuthLink(currentUrl).type)) {
           setIsPasswordRecovery(true);
           setCurrentView("new-password");
         }
